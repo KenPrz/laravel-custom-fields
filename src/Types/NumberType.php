@@ -18,10 +18,6 @@ class NumberType extends Type
 
     public function normalize(mixed $value, CustomField $field): mixed
     {
-        if (! is_string($value)) {
-            return $value;
-        }
-
         return filter_var($value, FILTER_VALIDATE_INT) !== false ? (int) $value : (float) $value;
     }
 }

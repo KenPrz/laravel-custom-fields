@@ -16,7 +16,8 @@ class DecimalType extends NumberType
 {
     public function rules(CustomField $field): array
     {
-        return ['numeric', 'decimal:0,'.$field->settings['places']];
+        // decimal checks numeric itself.
+        return ['decimal:0,'.$field->settings['places']];
     }
 
     public function normalize(mixed $value, CustomField $field): mixed
@@ -40,6 +41,6 @@ class DecimalType extends NumberType
 
     public function settingsRules(): array
     {
-        return ['places' => ['required', 'integer', 'min:0', 'max:30']];
+        return ['places' => ['integer', 'min:0', 'max:30']];
     }
 }

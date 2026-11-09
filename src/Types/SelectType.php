@@ -26,11 +26,6 @@ class SelectType extends Type
         return (string) $value;
     }
 
-    public function defaultSettings(): array
-    {
-        return ['options' => []];
-    }
-
     public function settingsRules(): array
     {
         return ['options' => ['required', 'array', 'min:1']];

@@ -324,13 +324,14 @@ trait HasCustomFields
      */
     protected function fillableFromArray(array $attributes): array
     {
-        $custom = array_filter(
-            $attributes,
-            fn (string|int $key) => is_string($key) && $this->isCustomFieldAttribute($key),
-            ARRAY_FILTER_USE_KEY,
-        );
+        $fillable = parent::fillableFromArray($attributes);
+        $dropped = array_diff_key($attributes, $fillable);
 
-        return parent::fillableFromArray($attributes) + $custom;
+        // Only look up field keys when $fillable dropped something: models are built with
+        // fill([]) on every hydration, and that must not cost a query.
+        return $dropped === []
+            ? $fillable
+            : $fillable + array_intersect_key($dropped, array_flip($this->customFieldAttributeKeys()));
     }
 
     /**
@@ -351,9 +352,11 @@ trait HasCustomFields
         $allowed = $this->customFieldAttributeKeys();
         $custom = [];
 
-        foreach ($this->collectCustomFieldValues($definitions) as $key => $value) {
-            if (! array_key_exists($key, $attributes) && in_array($key, $allowed, true)) {
-                $custom[$key] = $this->castCustomFieldValue($key, $value, $definitions->get($key)?->type, serialize: true);
+        $values = $this->collectCustomFieldValues($definitions);
+
+        foreach ($definitions as $key => $field) {
+            if (array_key_exists($key, $values) && ! array_key_exists($key, $attributes) && in_array($key, $allowed, true)) {
+                $custom[$key] = $this->castCustomFieldValue($key, $values[$key], $field->type, serialize: true);
             }
         }
 
@@ -412,7 +415,7 @@ trait HasCustomFields
             return;
         }
 
-        $this->validatePendingCustomFields();
+        // Always validated by now: by save(), or by the saving event for models with their own save().
         $fields = $this->customFieldDefinitions();
         $values = $this->validatedCustomFields ?? [];
 
@@ -420,7 +423,6 @@ trait HasCustomFields
         $this->validatedCustomFields = null;
 
         $inserted = $this->insertingWithCustomFields;
-        $this->insertingWithCustomFields = false;
         $written = $this->writeCustomFieldValues($fields, $values, $inserted);
 
         // A model inserted by this save has no other values, so the written rows are the
@@ -532,7 +534,7 @@ trait HasCustomFields
                 return $type instanceof NumberType
                     ? ValueQuery::number($driver, $column, '=', $normalized)
                     : ValueQuery::equals($driver, $column, '=', $normalized);
-            }, array_values($values));
+            }, $values);
 
             return [
                 '('.implode(' OR ', array_column($parts, 0)).')',
@@ -601,7 +603,13 @@ trait HasCustomFields
      */
     protected function customFieldAttributeKeys(): array
     {
-        $allowed = property_exists($this, 'customFields') ? array_values(array_filter((array) $this->customFields, is_string(...))) : [];
+        $allowed = [];
+
+        if (property_exists($this, 'customFields')) {
+            foreach ((array) $this->customFields as $key) {
+                $allowed[] = (string) $key;
+            }
+        }
 
         return $allowed !== [] ? $allowed : app(CustomFieldManager::class)->keysFor($this);
     }
@@ -644,7 +652,7 @@ trait HasCustomFields
                 : $this->customFieldValues()
                     ->whereIn('custom_field_id', $fields->map(fn (CustomField $field) => $field->getKey())->values()->all())
                     ->get()
-                    ->keyBy(fn (CustomFieldValue $value) => (string) $value->custom_field_id);
+                    ->keyBy('custom_field_id');
 
             $written = [];
 
@@ -736,7 +744,6 @@ trait HasCustomFields
         $caster = clone $this;
         $caster->pendingCustomFields = [];
         $caster->customFieldValueIndex = null;
-        $caster->insertingWithCustomFields = false;
         $caster->setRelations([]);
         $caster->setAppends([]);
         $caster->setHidden([]);
@@ -832,13 +839,13 @@ trait HasCustomFields
             $index = [];
 
             foreach ($values as $value) {
-                $index[(string) $value->custom_field_id] = $value;
+                $index[$value->custom_field_id] = $value;
             }
 
             $this->customFieldValueIndex = [$values, $index];
         }
 
-        return $this->customFieldValueIndex[1][(string) $field->getKey()] ?? null;
+        return $this->customFieldValueIndex[1][$field->getKey()] ?? null;
     }
 
     private function assertSavedForCustomFields(): void

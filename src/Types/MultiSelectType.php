@@ -20,15 +20,12 @@ class MultiSelectType extends SelectType
         $keys = $this->keys($field);
 
         return [
-            'array',
             'list',
             function (string $attribute, mixed $value, Closure $fail) use ($keys): void {
-                foreach ((array) $value as $item) {
-                    if (! is_scalar($item) || ! in_array((string) $item, $keys, true)) {
-                        $fail('The selected :attribute is invalid.');
+                $invalid = array_filter((array) $value, fn (mixed $item) => ! is_scalar($item) || ! in_array((string) $item, $keys, true));
 
-                        return;
-                    }
+                if ($invalid !== []) {
+                    $fail('The selected :attribute is invalid.');
                 }
             },
         ];

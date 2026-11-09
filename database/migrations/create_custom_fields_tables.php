@@ -16,7 +16,11 @@ return new class extends Migration
         Schema::create($fields, function (Blueprint $table) {
             $table->id();
             $table->string('model_type');
-            $table->nullableMorphs('scope');
+            // The scope id is a string so any tenant key works: integers, UUIDs, ULIDs, slugs.
+            // Lookups go through scope_key; scope_id only loads the scope relation.
+            $table->string('scope_type')->nullable();
+            $table->string('scope_id')->nullable();
+            $table->index(['scope_type', 'scope_id']);
             // '' for global fields, "{scope_type}:{scope_id}" otherwise. NULLs never collide
             // in a unique index on MySQL or Postgres, so the scope columns can't be used directly.
             $table->string('scope_key')->default('');

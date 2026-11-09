@@ -18,6 +18,7 @@ class TimeType extends Type
 
     public function normalize(mixed $value, CustomField $field): mixed
     {
-        return strlen((string) $value) === 5 ? $value.':00' : (string) $value;
+        // Validation guarantees a string in H:i or H:i:s.
+        return strlen($value) === 5 ? $value.':00' : $value;
     }
 }

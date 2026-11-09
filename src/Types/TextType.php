@@ -18,11 +18,6 @@ class TextType extends Type
         return ['string', 'max:'.$field->settings['max_length']];
     }
 
-    public function normalize(mixed $value, CustomField $field): mixed
-    {
-        return (string) $value;
-    }
-
     public function defaultSettings(): array
     {
         return ['max_length' => 255];
@@ -30,6 +25,6 @@ class TextType extends Type
 
     public function settingsRules(): array
     {
-        return ['max_length' => ['required', 'integer', 'min:1']];
+        return ['max_length' => ['integer', 'min:1']];
     }
 }

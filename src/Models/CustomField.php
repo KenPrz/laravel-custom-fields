@@ -16,7 +16,7 @@ use KenPrz\CustomFields\CustomFieldManager;
  * @property int $id
  * @property string $model_type
  * @property string|null $scope_type
- * @property string|int|null $scope_id
+ * @property string|null $scope_id
  * @property string $scope_key
  * @property string $key
  * @property string $label
@@ -79,8 +79,8 @@ class CustomField extends Model
         });
 
         static::saved(fn () => app(CustomFieldManager::class)->flush());
+        // restore() saves, so restored fields are covered by saved.
         static::deleted(fn () => app(CustomFieldManager::class)->flush());
-        static::restored(fn () => app(CustomFieldManager::class)->flush());
 
         // The foreign key cascades too, but SQLite only enforces it when foreign keys are on.
         static::forceDeleting(function (CustomField $field): void {

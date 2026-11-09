@@ -116,8 +116,7 @@ class CustomFieldManager
             ->where('model_type', $morph)
             ->distinct()
             ->pluck('key')
-            ->map(fn (mixed $key) => (string) $key)
-            ->values()
+            ->map(strval(...))
             ->all();
     }
 
@@ -172,7 +171,7 @@ class CustomFieldManager
     {
         $field = $this->newField($attributes);
 
-        return ['model' => $attributes['model'], ...$field->only(array_values(array_diff(self::CREATABLE, ['model'])))];
+        return ['model' => $attributes['model'], ...$field->only(array_diff(self::CREATABLE, ['model']))];
     }
 
     /**
@@ -268,7 +267,7 @@ class CustomFieldManager
         }
 
         // Stable sort: listed keys first in the given order, the rest keep their current order.
-        $positions = array_flip(array_values(array_unique($keys)));
+        $positions = array_flip(array_unique($keys));
         $ordered = $fields->sortBy(fn (CustomField $field) => $positions[$field->key] ?? count($positions))->values();
 
         $this->fieldModel()::query()->getConnection()->transaction(function () use ($ordered) {
@@ -440,7 +439,7 @@ class CustomFieldManager
     {
         $query = $this->fieldModel()::query()
             ->where('model_type', $morph)
-            ->whereIn('scope_key', array_unique(['', $scopeKey]));
+            ->whereIn('scope_key', ['', $scopeKey]);
 
         if (config('custom-fields.cache.enabled')) {
             // Raw attribute arrays, not models: caches may refuse to unserialize objects.
@@ -455,12 +454,17 @@ class CustomFieldManager
             $fields = $query->get();
         }
 
-        // Global fields first, so keyBy() lets a scoped field replace a global one.
+        // A scoped field replaces a global field with the same key, whichever was created first.
         // toBase(): an Eloquent collection's only()/except() match primary keys, not field keys.
-        return $fields->toBase()
-            ->sortBy(fn (CustomField $field) => $field->scope_key === '' ? 0 : 1)
-            ->keyBy('key')
-            ->sortBy([['sort_order', 'asc'], ['id', 'asc']]);
+        $byKey = [];
+
+        foreach ($fields as $field) {
+            if (! isset($byKey[$field->key]) || $byKey[$field->key]->scope_key === '') {
+                $byKey[$field->key] = $field;
+            }
+        }
+
+        return collect($byKey)->sortBy([['sort_order', 'asc'], ['id', 'asc']]);
     }
 
     /**
@@ -478,14 +482,14 @@ class CustomFieldManager
             'label' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'type' => [$required, 'string', Rule::in($this->types->names())],
-            'settings' => ['sometimes', 'array'],
-            'validation_rules' => ['sometimes', 'array', 'list'],
+            'settings' => ['array'],
+            'validation_rules' => ['list'],
             'validation_rules.*' => ['string'],
-            'is_required' => ['sometimes', 'boolean'],
-            'is_active' => ['sometimes', 'boolean'],
-            'is_searchable' => ['sometimes', 'boolean'],
-            'is_filterable' => ['sometimes', 'boolean'],
-            'sort_order' => ['sometimes', 'integer'],
+            'is_required' => ['boolean'],
+            'is_active' => ['boolean'],
+            'is_searchable' => ['boolean'],
+            'is_filterable' => ['boolean'],
+            'sort_order' => ['integer'],
         ], [
             'key.regex' => 'The key must start with a letter and contain only lowercase letters, numbers and underscores.',
         ])->after(function ($validator) use ($attributes) {
@@ -587,6 +591,7 @@ class CustomFieldManager
         $taken = method_exists($model, $key)
             || $model->hasCast($key)
             || $model->hasGetMutator($key)
+            || $model->hasSetMutator($key)
             || $model->hasAttributeMutator($key)
             || in_array($key, $model->getAppends(), true)
             || in_array($key, $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable()), true);

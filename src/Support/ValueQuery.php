@@ -50,7 +50,7 @@ final class ValueQuery
             'pgsql' => "CAST({$column} #>> '{}' AS numeric) {$operator} CAST(? AS numeric)",
             'sqlite' => "CAST(json_extract({$column}, '$') AS NUMERIC) {$operator} CAST(? AS NUMERIC)",
             default => throw self::unsupported($driver),
-        }, [(string) $value]];
+        }, [$value]];
     }
 
     /**

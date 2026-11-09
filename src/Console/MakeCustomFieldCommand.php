@@ -150,11 +150,9 @@ class MakeCustomFieldCommand extends Command
             return null;
         }
 
-        if (($error = $this->scopeError($scope)) !== null) {
-            throw $this->invalid('scope', $error);
-        }
+        $parsed = $this->parseScope($scope);
 
-        return $this->resolveScope($scope);
+        return $parsed instanceof Model ? $parsed : throw $this->invalid('scope', $parsed);
     }
 
     private function rejectScope(): null
@@ -195,7 +193,7 @@ class MakeCustomFieldCommand extends Command
         $type = $this->askOrOption(
             'type',
             fn (Closure $validate) => (string) select(label: 'Field type', options: $types->names(), default: 'text', scroll: 10),
-            fn (string $value) => $types->has($value) ? null : "The type [{$value}] is not registered. Available: ".implode(', ', $types->names()).'.',
+            fn (string $value) => $types->has($value) ? null : "The type [{$value}] is not registered. Available: ".implode(', ', $types->names()),
         ) ?? throw $this->invalid('type', 'The --type option is required.');
 
         $attributes = ['model' => $model, 'key' => $key, 'label' => $label, 'type' => $type];
@@ -248,8 +246,12 @@ class MakeCustomFieldCommand extends Command
         if ($given !== null) {
             $options = [];
 
-            foreach (array_filter(array_map(trim(...), explode(',', $given)), fn ($pair) => $pair !== '') as $pair) {
-                [$value, $label] = array_pad(array_map(trim(...), explode(':', $pair, 2)), 2, '');
+            foreach (explode(',', $given) as $pair) {
+                [$value, $label] = array_map(trim(...), explode(':', $pair, 2)) + [1 => ''];
+
+                if ($value === '') {
+                    continue;
+                }
 
                 if (array_key_exists($value, $options)) {
                     throw $this->invalid('options', "The option [{$value}] is listed twice.");
@@ -350,7 +352,7 @@ class MakeCustomFieldCommand extends Command
         $directory = $this->migrationDirectory();
         $file = $directory.'/'.date('Y_m_d_His').'_'.$this->migrationName($attributes['model'], $attributes['key']).'.php';
 
-        $model = '\\'.ltrim($attributes['model'], '\\').'::class';
+        $model = '\\'.$attributes['model'].'::class';
 
         $files->ensureDirectoryExists($directory);
         $files->put($file, str_replace(
@@ -376,7 +378,7 @@ class MakeCustomFieldCommand extends Command
 
         $existing = glob($this->migrationDirectory().'/*_'.$this->migrationName($model, $key).'.php') ?: [];
 
-        return $existing === [] ? null : 'A migration for the key ['.$key.'] already exists: '.basename($existing[0]).'.';
+        return $existing === [] ? null : 'A migration for the key ['.$key.'] already exists: '.basename($existing[0]);
     }
 
     /**
@@ -392,7 +394,7 @@ class MakeCustomFieldCommand extends Command
         $path = $this->stringOption('path');
 
         return $path !== null
-            ? $this->laravel->basePath(trim($path, '/'))
+            ? $this->laravel->basePath($path)
             : $this->laravel->databasePath('migrations');
     }
 
@@ -441,32 +443,35 @@ class MakeCustomFieldCommand extends Command
 
     private function scopeError(string $scope): ?string
     {
-        [$model, $id] = array_pad(explode(':', $scope, 2), 2, '');
+        $parsed = $this->parseScope($scope);
 
-        if ($id === '' || ($class = $this->resolveModel($model)) === null) {
+        return is_string($parsed) ? $parsed : null;
+    }
+
+    /**
+     * The scope record for "Model:id", or why there isn't one.
+     */
+    private function parseScope(string $scope): Model|string
+    {
+        [$model, $id] = explode(':', $scope, 2) + [1 => ''];
+        $class = $this->resolveModel($model);
+
+        if ($id === '' || $class === null) {
             return "The scope [{$scope}] must look like Model:id, for example Property:5.";
         }
 
-        return $class::query()->whereKey($id)->exists() ? null : "No [{$class}] with id [{$id}] exists.";
-    }
+        // Postgres rejects a non-numeric value for an integer key instead of matching nothing.
+        $integerKey = in_array((new $class)->getKeyType(), ['int', 'integer'], true);
 
-    private function resolveScope(string $scope): Model
-    {
-        [$model, $id] = explode(':', $scope, 2);
-        $class = $this->resolveModel($model) ?? throw $this->invalid('scope', "The model [{$model}] could not be found.");
-
-        return $class::query()->findOrFail($id);
+        return ($integerKey && ! ctype_digit($id) ? null : $class::query()->find($id))
+            ?? "No [{$class}] with id [{$id}] exists.";
     }
 
     private function rulesError(string $rules): ?string
     {
-        if ($rules === '') {
-            return null;
-        }
-
         $unknown = $this->laravel->make(FieldValidator::class)->unknownRules($this->splitRules($rules));
 
-        return $unknown === [] ? null : 'Unknown validation rules: '.implode(', ', $unknown).'.';
+        return $unknown === [] ? null : 'Unknown validation rules: '.implode(', ', $unknown);
     }
 
     /**
