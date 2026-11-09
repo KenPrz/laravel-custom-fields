@@ -94,3 +94,13 @@ jobs:
           DB_DATABASE: testing
           DB_USERNAME: ${{ matrix.user }}
           DB_PASSWORD: secret
+      - name: Benchmarks (query counts and exact results on a large dataset)
+        run: php -d memory_limit=1G vendor/bin/phpunit --group performance
+        env:
+          PERF_RECORDS: 5000
+          DB_CONNECTION: ${{ matrix.db }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.port }}
+          DB_DATABASE: testing
+          DB_USERNAME: ${{ matrix.user }}
+          DB_PASSWORD: secret

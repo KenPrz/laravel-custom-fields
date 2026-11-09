@@ -46,6 +46,7 @@ User::whereCustomField('tax_bracket', 'a')->get();
 - [Custom field types](#custom-field-types)
 - [Events](#events)
 - [Caching](#caching)
+- [Performance](#performance)
 - [Database compatibility](#database-compatibility)
 - [Testing](#testing)
 - [Limitations](#limitations)
@@ -740,6 +741,51 @@ SQL or `DB::table()`, call `CustomFields::flush()`.
 
 Values are never cached. They're always read from the database, so they can't go stale.
 Redis isn't required: any Laravel cache store works.
+
+## Performance
+
+Measured with the included benchmark: 10 custom fields per record, values for every field,
+PHP 8.5, databases in Docker on one laptop. Absolute numbers depend on your hardware; the
+shape is what matters.
+
+**Reading** (20,000 records, 200,000 values, loaded at once):
+
+| | SQLite | MySQL 8.4 | PostgreSQL 17 |
+|---|---|---|---|
+| Plain Eloquent, same rows (baseline) | 3.9 s | 4.4 s | 3.9 s |
+| `withCustomFields()->get()` | 4.6 s | 5.0 s | 5.2 s |
+| `listCustomFields()` on every record | 1.9 s | 1.9 s | 2.2 s |
+| `toArray()` on every record | 2.9 s | 2.8 s | 3.2 s |
+
+- Eager loading is always **2 queries** (records + values), plus 1 for field definitions per
+  request, however many records or fields. Memory is the same as plain Eloquent: about
+  330 MB for these 220,000 models.
+- For bigger sets, chunk: `chunkById(1000)` over 100,000 records ran in about 25 s with
+  flat memory (1 MB growth), 2 queries per chunk.
+
+**Filtering** (100,000 records, 1,000,000 values, one query each, exact results checked):
+
+| | SQLite | MySQL 8.4 | PostgreSQL 17 |
+|---|---|---|---|
+| equality on a select | 0.16 s | 0.25 s | 0.06 s |
+| numeric range | 0.18 s | 0.48 s | 0.09 s |
+| date range | 0.18 s | 0.43 s | 0.05 s |
+| list contains | 0.18 s | 0.46 s | 0.09 s |
+| text contains | 0.20 s | 0.43 s | 0.06 s |
+| two filters combined | 0.22 s | 0.44 s | 0.10 s |
+
+Filters grow linearly with the number of values for that field. See [Querying](#querying) for
+why there is no index on the values themselves.
+
+**Writing**: about 1.5–4 ms per record for 3 fields (validation, one read of the existing
+rows, one update per changed value). Unchanged values aren't written. A transaction around a
+bulk loop doesn't change much; the cost is Eloquent and the validator, not the commit.
+
+Run it yourself:
+
+```bash
+PERF_RECORDS=100000 composer bench
+```
 
 ## Database compatibility
 
