@@ -4,19 +4,28 @@ declare(strict_types=1);
 
 namespace KenPrz\CustomFields\Traits;
 
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use KenPrz\CustomFields\Contracts\FieldType;
 use KenPrz\CustomFields\CustomFieldManager;
 use KenPrz\CustomFields\Events\CustomFieldValueCreated;
 use KenPrz\CustomFields\Events\CustomFieldValueDeleted;
 use KenPrz\CustomFields\Events\CustomFieldValueUpdated;
 use KenPrz\CustomFields\Exceptions\CustomFieldException;
+use KenPrz\CustomFields\FieldTypeRegistry;
 use KenPrz\CustomFields\FieldValidator;
 use KenPrz\CustomFields\Models\CustomField;
 use KenPrz\CustomFields\Models\CustomFieldValue;
+use KenPrz\CustomFields\Support\ValueQuery;
+use KenPrz\CustomFields\Types\MultiSelectType;
+use KenPrz\CustomFields\Types\NumberType;
 
 /**
  * Adds custom fields to an Eloquent model.
@@ -205,6 +214,164 @@ trait HasCustomFields
     public function scopeWithCustomFields(Builder $query): void
     {
         $query->with('customFieldValues');
+    }
+
+    /**
+     * Filter by a custom field value, like where(): pass ($key, $value) or
+     * ($key, $operator, $value). Operators: = != <> > >= < <=.
+     *
+     * Numbers compare numerically. Dates, datetimes and times compare in
+     * time order. Other strings compare as text. A null value checks for a
+     * missing or null value. The value is validated and normalized with the
+     * field type first, so '30' finds an integer field holding 30.
+     *
+     * Uses the manager's current scope (see ScopeResolver), not
+     * customFieldScope(), because no single record is known yet.
+     *
+     * @param  Builder<static>  $query
+     *
+     * @throws ValidationException when the value doesn't fit the field type
+     */
+    public function scopeWhereCustomField(Builder $query, string $key, mixed $operator = null, mixed $value = null): void
+    {
+        if (func_num_args() === 3) {
+            [$operator, $value] = ['=', $operator];
+        }
+
+        if (! is_string($operator) || ! in_array($operator, ValueQuery::OPERATORS, true)) {
+            throw new InvalidArgumentException('Unsupported custom field operator ['.var_export($operator, true).'].');
+        }
+
+        if ($value === null) {
+            match ($operator) {
+                '=' => $this->scopeWhereCustomFieldNull($query, $key),
+                '!=', '<>' => $this->scopeWhereCustomFieldNotNull($query, $key),
+                default => throw new InvalidArgumentException("Cannot compare [{$key}] with null using [{$operator}]."),
+            };
+
+            return;
+        }
+
+        $this->whereCustomFieldValue($query, $key, function (string $driver, string $column, CustomField $field, FieldType $type) use ($key, $operator, $value) {
+            $normalized = $this->normalizeCustomFieldQueryValue($key, $field, $type, $value);
+
+            if ($type instanceof NumberType) {
+                return ValueQuery::number($driver, $column, $operator, $normalized);
+            }
+
+            if (in_array($operator, ['=', '!=', '<>'], true)) {
+                return ValueQuery::equals($driver, $column, $operator, $normalized);
+            }
+
+            if (! is_string($normalized)) {
+                throw new InvalidArgumentException("Cannot compare [{$key}] with [{$operator}].");
+            }
+
+            return ValueQuery::text($driver, $column, $operator, $normalized);
+        });
+    }
+
+    /**
+     * Filter by a custom field holding any of the given values.
+     *
+     * @param  Builder<static>  $query
+     * @param  array<int, mixed>  $values
+     */
+    public function scopeWhereCustomFieldIn(Builder $query, string $key, array $values): void
+    {
+        if ($values === []) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $this->whereCustomFieldValue($query, $key, function (string $driver, string $column, CustomField $field, FieldType $type) use ($key, $values) {
+            $parts = array_map(function (mixed $value) use ($driver, $column, $key, $field, $type) {
+                $normalized = $this->normalizeCustomFieldQueryValue($key, $field, $type, $value);
+
+                return $type instanceof NumberType
+                    ? ValueQuery::number($driver, $column, '=', $normalized)
+                    : ValueQuery::equals($driver, $column, '=', $normalized);
+            }, array_values($values));
+
+            return [
+                '('.implode(' OR ', array_column($parts, 0)).')',
+                array_merge(...array_column($parts, 1)),
+            ];
+        });
+    }
+
+    /**
+     * Filter by a custom field containing a value. For multiselect and
+     * checkbox fields this means the list has the option. For other fields
+     * it's a case-insensitive substring match on the stored text.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeWhereCustomFieldContains(Builder $query, string $key, string $value): void
+    {
+        $this->whereCustomFieldValue($query, $key, fn (string $driver, string $column, CustomField $field, FieldType $type) => $type instanceof MultiSelectType
+            ? ValueQuery::listContains($driver, $column, $value)
+            : ValueQuery::like($driver, $column, $value));
+    }
+
+    /**
+     * Records with no value, or a null value, for the field.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeWhereCustomFieldNull(Builder $query, string $key): void
+    {
+        $this->whereCustomFieldValue($query, $key, fn (string $driver, string $column) => ["{$column} IS NOT NULL", []], exists: false);
+    }
+
+    /**
+     * Records with a non-null value for the field.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeWhereCustomFieldNotNull(Builder $query, string $key): void
+    {
+        $this->whereCustomFieldValue($query, $key, fn (string $driver, string $column) => ["{$column} IS NOT NULL", []]);
+    }
+
+    /**
+     * @param  Builder<static>  $query
+     * @param  Closure(string, string, CustomField, FieldType): array{string, list<mixed>}  $constraint
+     */
+    private function whereCustomFieldValue(Builder $query, string $key, Closure $constraint, bool $exists = true): void
+    {
+        $field = app(CustomFieldManager::class)->fieldsFor($this)->get($key);
+
+        if ($field === null) {
+            if (config('custom-fields.strict')) {
+                throw CustomFieldException::unknownField($this->getMorphClass(), $key);
+            }
+
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $type = app(FieldTypeRegistry::class)->get($field->type);
+
+        $query->{$exists ? 'whereHas' : 'whereDoesntHave'}('customFieldValues', function (Builder $values) use ($field, $type, $constraint) {
+            $column = $values->getQuery()->getGrammar()->wrap($values->getModel()->qualifyColumn('value'));
+            [$sql, $bindings] = $constraint($values->getModel()->getConnection()->getDriverName(), $column, $field, $type);
+
+            // Not a literal string only because of the grammar-wrapped column name.
+            // Operators are whitelisted and every value is bound.
+            $sql = new Expression($sql); // @phpstan-ignore argument.type
+
+            $values->where('custom_field_id', $field->getKey())->whereRaw($sql, $bindings);
+        });
+    }
+
+    private function normalizeCustomFieldQueryValue(string $key, CustomField $field, FieldType $type, mixed $value): mixed
+    {
+        Validator::make([$key => $value], [$key => $type->rules($field)], [], [$key => $field->label])->validate();
+
+        return $type->normalize($value, $field);
     }
 
     protected function customFieldManager(): CustomFieldManager
