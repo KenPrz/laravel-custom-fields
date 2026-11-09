@@ -29,6 +29,8 @@ class CustomFieldsServiceProvider extends ServiceProvider
             return;
         }
 
+        $this->commands([Console\MakeCustomFieldCommand::class]);
+
         if (config('custom-fields.run_migrations')) {
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }

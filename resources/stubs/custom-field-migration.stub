@@ -1,0 +1,20 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use KenPrz\CustomFields\Facades\CustomFields;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        CustomFields::global()->create({{ attributes }});
+    }
+
+    /**
+     * Rolling back deletes the field and every value stored for it.
+     */
+    public function down(): void
+    {
+        CustomFields::global()->dropIfExists({{ model }}, {{ key }});
+    }
+};

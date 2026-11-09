@@ -151,21 +151,47 @@ class CustomFieldManager
      */
     public function create(array $attributes): CustomField
     {
-        $data = $this->validateDefinition($attributes);
-
-        $model = $this->fieldModel();
-        $field = new $model;
-        $field->model_type = $this->morphClass($attributes['model']);
-        $field->fill($data);
-        $field->scope()->associate($this->currentScope());
-
-        $this->assertKeyIsFree($field);
-        $this->assertKeyIsNotAnAttribute($field);
+        $field = $this->newField($attributes);
         $field->save();
 
         $this->dispatch(new Events\CustomFieldCreated($field));
 
         return $field;
+    }
+
+    /**
+     * Run every check create() runs, without saving. Returns the definition
+     * as it would be stored (settings merged over the type defaults).
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     *
+     * @throws ValidationException when the definition is invalid
+     */
+    public function check(array $attributes): array
+    {
+        $field = $this->newField($attributes);
+
+        return ['model' => $attributes['model'], ...$field->only(array_values(array_diff(self::CREATABLE, ['model'])))];
+    }
+
+    /**
+     * Why a new field can't use this key on the model in the current scope:
+     * bad format, already taken (including soft-deleted fields), or already
+     * meaning something on the model. Null when the key is free.
+     *
+     * @param  Model|class-string<Model>|string  $model
+     */
+    public function keyError(Model|string $model, string $key): ?string
+    {
+        if (! preg_match('/^[a-z][a-z0-9_]{0,63}$/', $key)) {
+            return 'The key must start with a letter and contain only lowercase letters, numbers and underscores.';
+        }
+
+        $morph = $this->morphClass($model);
+
+        return $this->takenError($morph, CustomField::scopeKeyFor($this->currentScope()), $key)
+            ?? $this->shadowError($morph, $key);
     }
 
     /**
@@ -288,6 +314,26 @@ class CustomFieldManager
         $field->forceDelete();
 
         $this->dispatch(new Events\CustomFieldDeleted($field, forced: true));
+    }
+
+    /**
+     * Force delete the field with this key in the current scope, including a
+     * soft-deleted one, and all its values. Does nothing when there's no such
+     * field. Meant for migration down() methods.
+     *
+     * @param  Model|class-string<Model>|string  $model
+     */
+    public function dropIfExists(Model|string $model, string $key): void
+    {
+        $field = $this->fieldModel()::withTrashed()
+            ->where('model_type', $this->morphClass($model))
+            ->where('scope_key', CustomField::scopeKeyFor($this->currentScope()))
+            ->where('key', $key)
+            ->first();
+
+        if ($field !== null) {
+            $this->forceDelete($field);
+        }
     }
 
     /**
@@ -468,18 +514,49 @@ class CustomFieldManager
         return [...$attributes, 'settings' => $settings];
     }
 
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function newField(array $attributes): CustomField
+    {
+        $data = $this->validateDefinition($attributes);
+
+        $model = $this->fieldModel();
+        $field = new $model;
+        $field->model_type = $this->morphClass($attributes['model']);
+        $field->fill($data);
+        $field->scope()->associate($this->currentScope());
+
+        $this->assertKeyIsFree($field);
+        $this->assertKeyIsNotAnAttribute($field);
+
+        return $field;
+    }
+
     private function assertKeyIsFree(CustomField $field): void
     {
+        $error = $this->takenError(
+            $field->model_type,
+            CustomField::scopeKeyFor($field->scope_type, $field->scope_id),
+            $field->key,
+            $field->exists ? $field->getKey() : null,
+        );
+
+        if ($error !== null) {
+            throw ValidationException::withMessages(['key' => $error]);
+        }
+    }
+
+    private function takenError(string $morph, string $scopeKey, string $key, int|string|null $ignoreId = null): ?string
+    {
         $taken = $this->fieldModel()::withTrashed()
-            ->where('model_type', $field->model_type)
-            ->where('scope_key', CustomField::scopeKeyFor($field->scope_type, $field->scope_id))
-            ->where('key', $field->key)
-            ->when($field->exists, fn ($query) => $query->whereKeyNot($field->getKey()))
+            ->where('model_type', $morph)
+            ->where('scope_key', $scopeKey)
+            ->where('key', $key)
+            ->when($ignoreId !== null, fn ($query) => $query->whereKeyNot($ignoreId))
             ->exists();
 
-        if ($taken) {
-            throw ValidationException::withMessages(['key' => "The key [{$field->key}] is already in use."]);
-        }
+        return $taken ? "The key [{$key}] is already in use." : null;
     }
 
     /**
@@ -489,15 +566,23 @@ class CustomFieldManager
      */
     private function assertKeyIsNotAnAttribute(CustomField $field): void
     {
-        $class = Relation::getMorphedModel($field->model_type) ?? $field->model_type;
+        $error = $this->shadowError($field->model_type, $field->key);
+
+        if ($error !== null) {
+            throw ValidationException::withMessages(['key' => $error]);
+        }
+    }
+
+    private function shadowError(string $morph, string $key): ?string
+    {
+        $class = Relation::getMorphedModel($morph) ?? $morph;
 
         if (! is_subclass_of($class, Model::class)) {
-            return;
+            return null;
         }
 
         /** @var Model $model */
         $model = new $class;
-        $key = $field->key;
 
         $taken = method_exists($model, $key)
             || $model->hasCast($key)
@@ -506,11 +591,7 @@ class CustomFieldManager
             || in_array($key, $model->getAppends(), true)
             || in_array($key, $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable()), true);
 
-        if ($taken) {
-            throw ValidationException::withMessages([
-                'key' => "The key [{$key}] is already used by the [{$class}] model.",
-            ]);
-        }
+        return $taken ? "The key [{$key}] is already used by the [{$class}] model." : null;
     }
 
     private function isVisible(CustomField $field): bool
