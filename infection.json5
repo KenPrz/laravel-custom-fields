@@ -1,0 +1,80 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "timeout": 30,
+    "logs": {
+        "text": "build/infection.log",
+        "summary": "build/infection-summary.log"
+    },
+    "mutators": {
+        "@default": true,
+
+        // Visibility is API design, not behaviour a test can observe.
+        "PublicVisibility": false,
+        "ProtectedVisibility": false,
+
+        // Equivalent mutants: these changes can't alter behaviour, so no test can catch them.
+        // Each regex names the exact line. Re-check this list when the line changes.
+        "Concat": {
+            // Memo and cache keys: reordering the parts keeps every key unique.
+            "ignoreSourceCodeByRegex": [".*\\$this->loaded\\[.*", ".*'custom-fields:'\\.\\$this->cacheVersion\\(\\).*"]
+        },
+        "ConcatOperandRemoval": {
+            // Same keys: the separators only guard against collisions that the formats rule out.
+            "ignoreSourceCodeByRegex": [".*\\$this->loaded\\[.*", ".*'custom-fields:'\\.\\$this->cacheVersion\\(\\).*"]
+        },
+        "ReturnRemoval": {
+            // morphClass(): without the early return, `new $model` on an instance yields the same morph class.
+            // writeCustomFieldValue(): without the return after an insert, the update branch finds nothing dirty.
+            "ignoreSourceCodeByRegex": [".*return \\$model->getMorphClass\\(\\);.*", ".*return \\$stored;.*"]
+        },
+        "IncrementInteger": {
+            // Validated decimals have at most one dot; the stored-values index is rebuilt either way.
+            "ignoreSourceCodeByRegex": [".*explode\\('\\.', ltrim.*", ".*customFieldValueIndex\\[0\\] !== \\$values.*"]
+        },
+        "NullSafePropertyCall": {
+            // create() requires a type, so the field is only consulted on update, where it exists.
+            "ignoreSourceCodeByRegex": [".*\\$attributes\\['type'\\] \\?\\? \\$field\\?->type.*"]
+        },
+        "CastArray": {
+            // $customFieldCasts and $customFields are always arrays when a model declares them.
+            "ignoreSourceCodeByRegex": [".*\\(array\\) \\$this->customFieldCasts.*", ".*\\(array\\) \\$this->customFields.*"]
+        },
+        "LogicalAnd": {
+            // Laravel's getAttribute('') returns before any of this matters.
+            "ignoreSourceCodeByRegex": [".*return is_string\\(\\$key\\).*"]
+        },
+        "UnwrapArrayValues": {
+            // allFiles() already returns a list; Eloquent accepts $with with any keys.
+            "ignoreSourceCodeByRegex": [".*return array_values\\(array_map\\(.*", ".*\\$this->with = array_values.*"]
+        },
+        "UnwrapArrayDiffKey": {
+            // fill() asks isFillable() for every key again, so passing extra keys through changes nothing.
+            "ignoreSourceCodeByRegex": [".*\\$dropped = array_diff_key.*"]
+        },
+        "UnwrapArrayIntersectKey": {
+            // Same: isFillable() rejects any key that isn't a custom field attribute.
+            "ignoreSourceCodeByRegex": [".*\\$fillable \\+ array_intersect_key.*"]
+        },
+        "CastString": {
+            // Field keys in $customFields are strings already; the cast only satisfies static analysis.
+            "ignoreSourceCodeByRegex": [".*\\$allowed\\[\\] = \\(string\\) \\$key.*"]
+        },
+
+        "global-ignoreSourceCodeByRegex": [
+            // Prompt presentation (placeholders, hints, list height, the preselected answer).
+            // Laravel's test fallback doesn't render these; they were checked in a real terminal.
+            ".*placeholder: .*",
+            ".*hint: .*",
+            ".*scroll: \\d+.*",
+            ".*confirm\\('Is this field required\\?', default: false\\).*",
+            ".*options: \\['migration' => .*",
+            ".*\\(string\\) select\\(.*",
+            ".*is_scalar\\(\\$answer\\).*",
+            // The cache version is a random token; its length doesn't matter.
+            ".*random_bytes\\(8\\).*"
+        ]
+    }
+}

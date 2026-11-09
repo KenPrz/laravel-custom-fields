@@ -132,9 +132,11 @@ php artisan vendor:publish --tag=custom-fields-migrations
 'run_migrations' => false,
 ```
 
-**UUID or ULID keys.** `scope_id` and `entity_id` use Laravel's default morph key type
-(big integers). If your models use UUIDs or ULIDs, call `Schema::morphUsingUuids()` or
-`Schema::morphUsingUlids()` in a service provider's `register()` method before migrating.
+**Key types.** Scopes (tenants) can have any primary key: integers, UUIDs, ULIDs or strings
+such as slugs, because `scope_id` is a string column. `entity_id`, the record a value belongs
+to, uses Laravel's default morph key type (big integers). If the models that get custom fields
+use UUIDs or ULIDs, call `Schema::morphUsingUuids()` or `Schema::morphUsingUlids()` in a
+service provider's `register()` method before migrating.
 
 **Rolling back** drops both tables and every stored value.
 
@@ -805,7 +807,26 @@ The test suite runs against all three supported databases in CI.
 composer test      # PHPUnit
 composer analyse   # Larastan, level 8
 composer lint      # Pint
+composer bench     # large-dataset benchmarks, see Performance
 ```
+
+Mutation testing uses [Infection](https://infection.github.io). It isn't a dev dependency
+(it needs a newer `symfony/console` than the oldest supported Laravel 12), so install it when
+you want it. It needs pcov or Xdebug:
+
+```bash
+composer require --dev infection/infection
+vendor/bin/infection --threads=max
+```
+
+What CI checks on every push:
+
+- The full suite on PHP 8.3–8.5 × Laravel 12/13, lowest and newest dependencies.
+- The full suite and the benchmarks on MySQL 8.4 and PostgreSQL 17.
+- 100% line coverage across the three databases.
+- Mutation testing: Infection makes about 1,000 small deliberate changes to the code and
+  the tests must catch at least 99% of them. Changes that can't alter behaviour are listed,
+  with the reason, in `infection.json5`.
 
 The suite runs on in-memory SQLite by default. To run it against MySQL or PostgreSQL, set the
 usual `DB_*` variables:

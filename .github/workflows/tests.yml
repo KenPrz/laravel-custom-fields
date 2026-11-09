@@ -104,3 +104,21 @@ jobs:
           DB_DATABASE: testing
           DB_USERNAME: ${{ matrix.user }}
           DB_PASSWORD: secret
+
+  mutation:
+    runs-on: ubuntu-latest
+    name: mutation testing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php: '8.4'
+          extensions: pdo_sqlite
+          coverage: pcov
+      # Installed here rather than in require-dev: Infection needs symfony/console 7.4+, which
+      # would stop the lowest-dependency jobs from testing older Laravel 12 releases.
+      - run: |
+          composer config allow-plugins.infection/extension-installer true
+          composer require --dev infection/infection --no-interaction --no-progress
+      # Fails when tests stop catching more than 1% of deliberate code changes.
+      - run: vendor/bin/infection --threads=max --min-covered-msi=99 --no-progress --show-mutations
