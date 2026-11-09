@@ -11,6 +11,13 @@ class CustomFieldsServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/custom-fields.php', 'custom-fields');
+
+        $this->app->singleton(FieldTypeRegistry::class, function ($app) {
+            $registry = new FieldTypeRegistry($app);
+            $registry->registerBuiltIns();
+
+            return $registry;
+        });
     }
 
     public function boot(): void
