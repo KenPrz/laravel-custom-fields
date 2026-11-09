@@ -19,6 +19,10 @@ class CustomFieldsServiceProvider extends ServiceProvider
             return;
         }
 
+        if (config('custom-fields.run_migrations')) {
+            $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        }
+
         $this->publishes([
             __DIR__.'/../config/custom-fields.php' => config_path('custom-fields.php'),
         ], 'custom-fields-config');

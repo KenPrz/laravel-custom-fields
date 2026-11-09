@@ -5,3 +5,9 @@ All notable changes to this package are documented here. The format follows
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+### Added
+
+- `custom_fields` and `custom_field_values` tables, with configurable names.
+- `CustomField` and `CustomFieldValue` models, swappable through config.
+- `run_migrations` option to turn off the package migrations after publishing them.
