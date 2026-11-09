@@ -263,6 +263,7 @@ class SaveUserRequest extends FormRequest
   with it first: `new Reservation(['property_id' => $this->property_id])`.
 - Only fields in `$customFields` (or all fields, when it's empty) and only active fields are
   included.
+
 ## Creating and managing fields
 
 Field definitions are managed through the `CustomFields` facade.
@@ -386,6 +387,7 @@ Both ways follow the same rules:
 
 The explicit methods need a saved model and throw `CustomFieldException` otherwise. Attribute
 assignment works on new models too.
+
 ## Retrieving values
 
 ```php
@@ -414,6 +416,7 @@ and the field definitions (loaded once per model and scope per request).
 
 **Inactive fields** still return their stored values. **Soft-deleted fields** are hidden
 until restored.
+
 ## Validation
 
 Each value is checked against, in order:
@@ -443,11 +446,10 @@ Other checks:
 - **Required fields** reject `null`, `''`, `[]` and `forgetCustomField()`.
 - **Partial updates.** Saves and `syncCustomFields()` only check the keys you pass, so a
   required field you didn't pass isn't reported as missing. To demand every required field,
-  use `customFieldRules()` on a new model in your [form request](#form-requests), or validate
-  the full input yourself:
+  use the rules of a new model, in a [form request](#form-requests) or directly:
 
 ```php
-$values = CustomFields::validate(User::class, $request->only(array_keys((new User)->customFieldRules())));
+Validator::make($input, (new User)->customFieldRules())->validate();
 ```
 
 Treat field definitions as configuration, not user input: anyone who can edit a field's
@@ -625,8 +627,9 @@ they can't be fetched again.
 | `CustomFieldValueUpdated` | `value`, `field`, `entity`, `oldValue` |
 | `CustomFieldValueDeleted` | `value`, `field`, `entity` |
 
-Events fire for changes made through the facade, the trait and attribute saves. Changes you make directly with
-Eloquent or the query builder don't fire them. Turn all events off with `'events' => false`.
+Events fire for changes made through the facade, the trait and attribute saves. Changes you
+make directly to the package tables with Eloquent or the query builder don't fire them. Turn
+all events off with `'events' => false`.
 
 ## Caching
 
@@ -681,7 +684,6 @@ DB_USERNAME=postgres DB_PASSWORD=secret composer test
   without the shared transaction.
 - **First fill per request** runs one small query for the model's field keys, unless
   `$customFields` lists them.
-
 - **Type changes** are blocked once a field has values. See
   [Creating and managing fields](#creating-and-managing-fields).
 - **Queries use the request scope**, not each record's `customFieldScope()`.
@@ -722,9 +724,10 @@ class UserController
 }
 ```
 
-With `SaveUserRequest` from [Form requests](#form-requests), a field that's required, an
-invalid select option or an unknown key all come back as a normal 422 response, next to the
-errors for your columns.
+With `SaveUserRequest` from [Form requests](#form-requests), a missing required field or an
+invalid value comes back as a normal 422 response, next to the errors for your columns. Keys
+without a rule are left out of `validated()`, as usual in Laravel, so they never reach the model.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
