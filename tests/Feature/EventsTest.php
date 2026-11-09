@@ -125,6 +125,22 @@ class EventsTest extends TestCase
         $this->assertSame(['created'], $fired);
     }
 
+    #[Test]
+    public function events_survive_queue_serialization(): void
+    {
+        $field = $this->field();
+        $reservation = Reservation::create(['code' => 'R1']);
+        $reservation->setCustomField('notes', 'one');
+        $value = $reservation->customFieldValues()->first();
+
+        $event = unserialize(serialize(new CustomFieldValueUpdated($value, $field, $reservation, 'zero')));
+
+        $this->assertTrue($event->entity->is($reservation));
+        $this->assertTrue($event->field->is($field));
+        $this->assertSame('one', $event->value->value);
+        $this->assertSame('zero', $event->oldValue);
+    }
+
     private function field(): CustomField
     {
         return CustomFields::create(['model' => Reservation::class, 'key' => 'notes', 'label' => 'Notes', 'type' => 'text']);

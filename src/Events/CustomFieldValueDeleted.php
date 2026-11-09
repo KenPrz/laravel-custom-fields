@@ -9,6 +9,10 @@ use Illuminate\Database\Eloquent\Model;
 use KenPrz\CustomFields\Models\CustomField;
 use KenPrz\CustomFields\Models\CustomFieldValue;
 
+/**
+ * Carries the deleted models as they were, without SerializesModels: a queued
+ * listener couldn't fetch them back from the database.
+ */
 class CustomFieldValueDeleted implements ShouldDispatchAfterCommit
 {
     public function __construct(
