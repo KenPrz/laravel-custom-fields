@@ -56,7 +56,10 @@ class MakeCustomFieldCommandTest extends TestCase
         $this->assertSame(0, CustomField::count(), 'migration mode writes nothing to the database');
 
         $migration = $this->migrationFile();
-        $this->assertStringContainsString("'model' => \\".Reservation::class.'::class,', file_get_contents($migration));
+        $code = file_get_contents($migration);
+        $this->assertStringContainsString("'model' => \\".Reservation::class.'::class,', $code);
+        $this->assertStringContainsString("            'validation_rules' => [\n                'string',\n                'max:20',\n            ],", $code);
+        $this->assertStringNotContainsString('0 =>', $code);
 
         (require $migration)->up();
 

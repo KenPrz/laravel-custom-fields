@@ -13,7 +13,6 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use KenPrz\CustomFields\CustomFieldManager;
-use KenPrz\CustomFields\Exceptions\CustomFieldException;
 use KenPrz\CustomFields\FieldValidator;
 use KenPrz\CustomFields\Types\SelectType;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -61,10 +60,6 @@ class MakeCustomFieldCommand extends Command
                     $this->components->error($message);
                 }
             }
-
-            return self::FAILURE;
-        } catch (CustomFieldException $e) {
-            $this->components->error($e->getMessage());
 
             return self::FAILURE;
         }
@@ -410,6 +405,7 @@ class MakeCustomFieldCommand extends Command
     private function export(array $value, int $depth, array $raw = []): string
     {
         $indent = str_repeat('    ', $depth + 1);
+        $isList = array_is_list($value);
         $lines = [];
 
         foreach ($value as $key => $item) {
@@ -419,7 +415,7 @@ class MakeCustomFieldCommand extends Command
                 default => var_export($item, true),
             };
 
-            $lines[] = $indent.var_export($key, true).' => '.$code.',';
+            $lines[] = $indent.($isList ? '' : var_export($key, true).' => ').$code.',';
         }
 
         return "[\n".implode("\n", $lines)."\n".str_repeat('    ', $depth).']';
