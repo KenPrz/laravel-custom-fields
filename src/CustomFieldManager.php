@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace KenPrz\CustomFields;
 
 use ArrayObject;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Validation\Factory as ValidatorFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -310,12 +311,19 @@ class CustomFieldManager
     }
 
     /**
-     * Forget field lists loaded during this request. Called automatically
-     * whenever a field is saved or deleted.
+     * Forget field lists loaded during this request, and the cached ones when
+     * caching is on. Called automatically whenever a field model is saved,
+     * deleted or restored. Call it yourself after changing the fields table
+     * without Eloquent.
      */
     public function flush(): void
     {
         $this->loaded->exchangeArray([]);
+
+        if (config('custom-fields.cache.enabled')) {
+            // A new version makes every cached field list unreachable at once, on any cache store.
+            $this->cache()->forever('custom-fields:version', bin2hex(random_bytes(8)));
+        }
     }
 
     /**
@@ -357,10 +365,22 @@ class CustomFieldManager
      */
     private function loadFields(string $morph, string $scopeKey): Collection
     {
-        $fields = $this->fieldModel()::query()
+        $query = $this->fieldModel()::query()
             ->where('model_type', $morph)
-            ->whereIn('scope_key', array_unique(['', $scopeKey]))
-            ->get();
+            ->whereIn('scope_key', array_unique(['', $scopeKey]));
+
+        if (config('custom-fields.cache.enabled')) {
+            // Raw attribute arrays, not models: caches may refuse to unserialize objects.
+            $rows = $this->cache()->remember(
+                'custom-fields:'.$this->cacheVersion().':'.sha1($morph.'|'.$scopeKey),
+                (int) config('custom-fields.cache.ttl'),
+                fn () => $query->get()->map(fn (CustomField $field) => $field->getAttributes())->all(),
+            );
+
+            $fields = $this->fieldModel()::hydrate($rows);
+        } else {
+            $fields = $query->get();
+        }
 
         // Global fields first, so keyBy() lets a scoped field replace a global one.
         // toBase(): an Eloquent collection's only()/except() match primary keys, not field keys.
@@ -447,6 +467,16 @@ class CustomFieldManager
         if (! $this->isVisible($field)) {
             throw CustomFieldException::outOfScope($field->key);
         }
+    }
+
+    private function cache(): CacheRepository
+    {
+        return $this->container->make('cache')->store(config('custom-fields.cache.store'));
+    }
+
+    private function cacheVersion(): string
+    {
+        return (string) $this->cache()->rememberForever('custom-fields:version', fn () => bin2hex(random_bytes(8)));
     }
 
     /**

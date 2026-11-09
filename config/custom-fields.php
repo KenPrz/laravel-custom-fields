@@ -98,4 +98,21 @@ return [
 
     'events' => true,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Field definition cache
+    |--------------------------------------------------------------------------
+    |
+    | Cache field definitions across requests with Laravel's cache. Saving a
+    | field through Eloquent or the package clears it. Values are never
+    | cached. `store` is a cache store name, or null for the default store.
+    |
+    */
+
+    'cache' => [
+        'enabled' => false,
+        'store' => null,
+        'ttl' => 3600,
+    ],
+
 ];
