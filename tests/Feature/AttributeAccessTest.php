@@ -222,6 +222,22 @@ class AttributeAccessTest extends TestCase
     }
 
     #[Test]
+    public function saving_the_same_instance_again_keeps_earlier_values(): void
+    {
+        $member = Member::create(['name' => 'Ken', 'tier' => 'gold']);
+        $member->nickname = 'kp';
+        $member->save();
+
+        $this->assertSame(Tier::Gold, $member->tier);
+        $this->assertSame('kp', $member->nickname);
+        $this->assertSame(['tier' => 'gold', 'nickname' => 'kp'], $member->listCustomFields());
+
+        $member->setCustomField('nickname', 'kenny');
+        $member->setCustomField('nickname', 'ken');
+        $this->assertSame(['tier' => 'gold', 'nickname' => 'ken'], Member::find($member->id)->listCustomFields());
+    }
+
+    #[Test]
     public function an_updated_model_reloads_values_instead_of_guessing(): void
     {
         $member = Member::create(['name' => 'Ken', 'tier' => 'gold']);

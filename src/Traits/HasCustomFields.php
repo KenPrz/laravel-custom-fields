@@ -64,11 +64,28 @@ trait HasCustomFields
      */
     private ?array $validatedCustomFields = null;
 
+    /**
+     * Whether the save in progress inserts the model. wasRecentlyCreated can't
+     * tell: it stays true for the life of the instance.
+     */
+    private bool $insertingWithCustomFields = false;
+
+    /**
+     * The loaded value rows keyed by field id, with the collection they were
+     * built from. Rebuilt whenever the relation is replaced or reloaded.
+     *
+     * @var array{0: \Illuminate\Database\Eloquent\Collection<int, CustomFieldValue>, 1: array<string, CustomFieldValue>}|null
+     */
+    private ?array $customFieldValueIndex = null;
+
     public static function bootHasCustomFields(): void
     {
         // Covers models that override save() themselves. HasCustomFields::save() does the same
         // work and also runs inside a transaction and without events (saveQuietly).
-        static::saving(fn (self $model) => $model->validatePendingCustomFields());
+        static::saving(function (self $model): void {
+            $model->insertingWithCustomFields = ! $model->exists;
+            $model->validatePendingCustomFields();
+        });
         static::saved(fn (self $model) => $model->writePendingCustomFields());
 
         static::deleted(function (self $model): void {
@@ -141,17 +158,7 @@ trait HasCustomFields
      */
     public function listCustomFields(): array
     {
-        $values = [];
-
-        foreach ($this->customFieldDefinitions() as $key => $field) {
-            if (array_key_exists($key, $this->pendingCustomFields)) {
-                $values[$key] = $this->pendingCustomFields[$key];
-            } elseif ($this->exists && ($stored = $this->storedCustomFieldValue($field)) !== null) {
-                $values[$key] = $stored->value;
-            }
-        }
-
-        return $values;
+        return $this->collectCustomFieldValues($this->customFieldDefinitions());
     }
 
     /**
@@ -226,12 +233,7 @@ trait HasCustomFields
         $fields = $this->customFieldDefinitions();
         $normalized = $this->validateCustomFieldInput($fields, $values);
 
-        $this->customFieldTransaction(function () use ($fields, $normalized) {
-            foreach ($fields->only(array_keys($normalized)) as $key => $field) {
-                $this->writeCustomFieldValue($field, $normalized[$key]);
-            }
-        });
-
+        $this->writeCustomFieldValues($fields, $normalized, inserted: false);
         $this->unsetRelation('customFieldValues');
 
         return $this;
@@ -274,9 +276,12 @@ trait HasCustomFields
     public function getAttribute($key): mixed
     {
         if ($this->answersAsCustomField($key)) {
-            return $this->castCustomFieldValue($key, array_key_exists($key, $this->pendingCustomFields)
+            $field = $this->customFieldDefinitions()->get($key);
+            $value = array_key_exists($key, $this->pendingCustomFields)
                 ? $this->pendingCustomFields[$key]
-                : $this->storedCustomFieldAttribute($key));
+                : ($field !== null && $this->exists ? $this->storedCustomFieldValue($field)?->value : null);
+
+            return $this->castCustomFieldValue($key, $value, $field?->type);
         }
 
         return parent::getAttribute($key);
@@ -342,11 +347,13 @@ trait HasCustomFields
             return $attributes;
         }
 
+        $definitions = $this->customFieldDefinitions();
+        $allowed = $this->customFieldAttributeKeys();
         $custom = [];
 
-        foreach ($this->listCustomFields() as $key => $value) {
-            if (! array_key_exists($key, $attributes) && $this->isCustomFieldAttribute($key)) {
-                $custom[$key] = $this->castCustomFieldValue($key, $value, serialize: true);
+        foreach ($this->collectCustomFieldValues($definitions) as $key => $value) {
+            if (! array_key_exists($key, $attributes) && in_array($key, $allowed, true)) {
+                $custom[$key] = $this->castCustomFieldValue($key, $value, $definitions->get($key)?->type, serialize: true);
             }
         }
 
@@ -368,6 +375,7 @@ trait HasCustomFields
         }
 
         $this->validatePendingCustomFields();
+        $this->insertingWithCustomFields = ! $this->exists;
 
         return $this->customFieldTransaction(function () use ($options) {
             if (! parent::save($options)) {
@@ -411,19 +419,13 @@ trait HasCustomFields
         $this->pendingCustomFields = [];
         $this->validatedCustomFields = null;
 
-        $written = $this->customFieldTransaction(function () use ($fields, $values) {
-            $written = [];
+        $inserted = $this->insertingWithCustomFields;
+        $this->insertingWithCustomFields = false;
+        $written = $this->writeCustomFieldValues($fields, $values, $inserted);
 
-            foreach ($fields->only(array_keys($values)) as $key => $field) {
-                $written[] = $this->writeCustomFieldValue($field, $values[$key]);
-            }
-
-            return $written;
-        });
-
-        // A model created just now has no other values, so the written rows are the
+        // A model inserted by this save has no other values, so the written rows are the
         // complete relation and the response can include them without another query.
-        if ($this->wasRecentlyCreated) {
+        if ($inserted) {
             $this->setRelation('customFieldValues', $this->customFieldValues()->getRelated()->newCollection($written));
         } else {
             $this->unsetRelation('customFieldValues');
@@ -588,20 +590,27 @@ trait HasCustomFields
      */
     protected function isCustomFieldAttribute(string $key): bool
     {
-        $allowed = property_exists($this, 'customFields') ? (array) $this->customFields : [];
+        return in_array($key, $this->customFieldAttributeKeys(), true);
+    }
 
-        if ($allowed !== []) {
-            return in_array($key, $allowed, true);
-        }
+    /**
+     * The keys that act as attributes: $customFields, or every field key
+     * defined for the model when that's empty.
+     *
+     * @return list<string>
+     */
+    protected function customFieldAttributeKeys(): array
+    {
+        $allowed = property_exists($this, 'customFields') ? array_values(array_filter((array) $this->customFields, is_string(...))) : [];
 
-        return in_array($key, app(CustomFieldManager::class)->keysFor($this), true);
+        return $allowed !== [] ? $allowed : app(CustomFieldManager::class)->keysFor($this);
     }
 
     /**
      * The cast for a custom field attribute: $customFieldCasts, else a
      * default for the field type (dates become Carbon), else none.
      */
-    protected function customFieldCast(string $key): ?string
+    protected function customFieldCast(string $key, ?string $type): ?string
     {
         $casts = property_exists($this, 'customFieldCasts') ? (array) $this->customFieldCasts : [];
 
@@ -609,17 +618,47 @@ trait HasCustomFields
             return $casts[$key];
         }
 
-        return match ($this->customFieldDefinitions()->get($key)?->type) {
+        return match ($type) {
             'date' => 'date:Y-m-d',
             'datetime' => 'datetime',
             default => null,
         };
     }
 
-    protected function writeCustomFieldValue(CustomField $field, mixed $value): CustomFieldValue
+    /**
+     * Write normalized values in one transaction. The existing rows are read
+     * in one query up front, or not at all when this save just inserted the
+     * model, so each field costs a single insert or update.
+     *
+     * @param  Collection<string, CustomField>  $fields
+     * @param  array<string, mixed>  $values
+     * @return list<CustomFieldValue>
+     */
+    private function writeCustomFieldValues(Collection $fields, array $values, bool $inserted): array
+    {
+        $fields = $fields->only(array_keys($values));
+
+        return $this->customFieldTransaction(function () use ($fields, $values, $inserted) {
+            $existing = $inserted || $fields->isEmpty()
+                ? collect()
+                : $this->customFieldValues()
+                    ->whereIn('custom_field_id', $fields->map(fn (CustomField $field) => $field->getKey())->values()->all())
+                    ->get()
+                    ->keyBy(fn (CustomFieldValue $value) => (string) $value->custom_field_id);
+
+            $written = [];
+
+            foreach ($fields as $key => $field) {
+                $written[] = $this->writeCustomFieldValue($field, $values[$key], $existing->get((string) $field->getKey()));
+            }
+
+            return $written;
+        });
+    }
+
+    protected function writeCustomFieldValue(CustomField $field, mixed $value, ?CustomFieldValue $stored): CustomFieldValue
     {
         $existing = fn () => $this->customFieldValues()->where('custom_field_id', $field->getKey());
-        $stored = $existing()->first();
 
         if ($stored === null) {
             try {
@@ -662,15 +701,23 @@ trait HasCustomFields
             && $this->isCustomFieldAttribute($key);
     }
 
-    private function storedCustomFieldAttribute(string $key): mixed
+    /**
+     * @param  Collection<string, CustomField>  $definitions
+     * @return array<string, mixed>
+     */
+    private function collectCustomFieldValues(Collection $definitions): array
     {
-        $field = $this->customFieldDefinitions()->get($key);
+        $values = [];
 
-        if ($field === null || ! $this->exists) {
-            return null;
+        foreach ($definitions as $key => $field) {
+            if (array_key_exists($key, $this->pendingCustomFields)) {
+                $values[$key] = $this->pendingCustomFields[$key];
+            } elseif ($this->exists && ($stored = $this->storedCustomFieldValue($field)) !== null) {
+                $values[$key] = $stored->value;
+            }
         }
 
-        return $this->storedCustomFieldValue($field)?->value;
+        return $values;
     }
 
     /**
@@ -678,9 +725,9 @@ trait HasCustomFields
      * model so date formats, timezones and custom cast classes behave exactly
      * like they do for columns.
      */
-    private function castCustomFieldValue(string $key, mixed $value, bool $serialize = false): mixed
+    private function castCustomFieldValue(string $key, mixed $value, ?string $type, bool $serialize = false): mixed
     {
-        $cast = $value === null ? null : $this->customFieldCast($key);
+        $cast = $value === null ? null : $this->customFieldCast($key, $type);
 
         if ($cast === null) {
             return $value;
@@ -688,6 +735,8 @@ trait HasCustomFields
 
         $caster = clone $this;
         $caster->pendingCustomFields = [];
+        $caster->customFieldValueIndex = null;
+        $caster->insertingWithCustomFields = false;
         $caster->setRelations([]);
         $caster->setAppends([]);
         $caster->setHidden([]);
@@ -774,9 +823,22 @@ trait HasCustomFields
 
     private function storedCustomFieldValue(CustomField $field): ?CustomFieldValue
     {
-        return $this->customFieldValues->first(
-            fn (CustomFieldValue $value) => (string) $value->custom_field_id === (string) $field->getKey()
-        );
+        // getRelationValue() skips the __get/getAttribute chain, which this hot path can't afford.
+        $values = $this->getRelationValue('customFieldValues');
+
+        // Holding the collection itself (not its id) means a reloaded relation can never
+        // be mistaken for the one the index was built from.
+        if ($this->customFieldValueIndex === null || $this->customFieldValueIndex[0] !== $values) {
+            $index = [];
+
+            foreach ($values as $value) {
+                $index[(string) $value->custom_field_id] = $value;
+            }
+
+            $this->customFieldValueIndex = [$values, $index];
+        }
+
+        return $this->customFieldValueIndex[1][(string) $field->getKey()] ?? null;
     }
 
     private function assertSavedForCustomFields(): void
