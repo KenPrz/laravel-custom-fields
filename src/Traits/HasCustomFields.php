@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Query\Expression;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -381,15 +382,25 @@ trait HasCustomFields
 
     protected function writeCustomFieldValue(CustomField $field, mixed $value): void
     {
-        $stored = $this->customFieldValues()->firstOrCreate(
-            ['custom_field_id' => $field->getKey()],
-            ['value' => $value],
-        );
+        $existing = fn () => $this->customFieldValues()->where('custom_field_id', $field->getKey());
+        $stored = $existing()->first();
 
-        if ($stored->wasRecentlyCreated) {
-            app(CustomFieldManager::class)->dispatch(new CustomFieldValueCreated($stored, $field, $this));
+        if ($stored === null) {
+            try {
+                // Savepoint, so a failed insert doesn't abort the surrounding Postgres transaction.
+                $stored = $existing()->withSavepointIfNeeded(fn () => $this->customFieldValues()->create([
+                    'custom_field_id' => $field->getKey(),
+                    'value' => $value,
+                ]));
 
-            return;
+                app(CustomFieldManager::class)->dispatch(new CustomFieldValueCreated($stored, $field, $this));
+
+                return;
+            } catch (UniqueConstraintViolationException) {
+                // Another request inserted the row first. A locking read sees it even
+                // under MySQL's repeatable read, where a plain select would not.
+                $stored = $existing()->lockForUpdate()->firstOrFail();
+            }
         }
 
         $old = $stored->value;
