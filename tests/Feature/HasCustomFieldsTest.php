@@ -76,7 +76,7 @@ class HasCustomFieldsTest extends TestCase
         $this->reservation->setCustomField('internal_reference', null);
 
         $this->assertSame('none', $this->reservation->getCustomField('internal_reference', 'none'));
-        $this->assertSame(['internal_reference' => null], $this->reservation->getCustomFieldValues());
+        $this->assertSame(['internal_reference' => null], $this->reservation->listCustomFields());
         $this->assertFalse($this->reservation->hasCustomField('internal_reference'));
         $this->assertSame(1, CustomFieldValue::count());
     }
@@ -105,7 +105,7 @@ class HasCustomFieldsTest extends TestCase
 
         $this->assertSame(
             ['internal_reference' => 'REF-001', 'guest_classification' => 'corporate'],
-            $this->reservation->getCustomFieldValues(),
+            $this->reservation->listCustomFields(),
         );
     }
 
@@ -182,7 +182,7 @@ class HasCustomFieldsTest extends TestCase
         $this->reservation->forgetCustomField('nope');
 
         $this->assertSame('x', $this->reservation->getCustomField('nope', 'x'));
-        $this->assertSame(['guest_age' => 40], $this->reservation->getCustomFieldValues());
+        $this->assertSame(['guest_age' => 40], $this->reservation->listCustomFields());
     }
 
     #[Test]
@@ -221,7 +221,7 @@ class HasCustomFieldsTest extends TestCase
         $field = CustomFields::findByKey(Reservation::class, 'guest_age');
 
         CustomFields::delete($field);
-        $this->assertArrayNotHasKey('guest_age', Reservation::find($this->reservation->id)->getCustomFieldValues());
+        $this->assertArrayNotHasKey('guest_age', Reservation::find($this->reservation->id)->listCustomFields());
 
         CustomFields::restore($field);
         $this->assertSame(30, Reservation::find($this->reservation->id)->getCustomField('guest_age'));
@@ -235,7 +235,7 @@ class HasCustomFieldsTest extends TestCase
         $this->assertSame($this->reservation, $this->reservation->forgetCustomField('guest_age'));
         $this->reservation->forgetCustomField('guest_age');
 
-        $this->assertSame(['internal_reference' => 'REF'], $this->reservation->getCustomFieldValues());
+        $this->assertSame(['internal_reference' => 'REF'], $this->reservation->listCustomFields());
     }
 
     #[Test]
@@ -260,15 +260,15 @@ class HasCustomFieldsTest extends TestCase
     {
         $this->reservation->syncCustomFields(['guest_age' => 30, 'guest_classification' => 'vip', 'internal_reference' => 'REF']);
 
-        $this->assertSame(['internal_reference', 'guest_classification', 'guest_age'], array_keys($this->reservation->getCustomFieldValues()));
+        $this->assertSame(['internal_reference', 'guest_classification', 'guest_age'], array_keys($this->reservation->listCustomFields()));
     }
 
     #[Test]
-    public function custom_fields_lists_the_definitions(): void
+    public function custom_field_definitions_are_listed(): void
     {
         $this->assertSame(
             ['internal_reference', 'guest_classification', 'guest_age', 'amenities'],
-            $this->reservation->customFields()->keys()->all(),
+            $this->reservation->customFieldDefinitions()->keys()->all(),
         );
     }
 
@@ -289,7 +289,7 @@ class HasCustomFieldsTest extends TestCase
         CustomFields::flush();
 
         DB::enableQueryLog();
-        $values = Reservation::withCustomFields()->get()->map->getCustomFieldValues();
+        $values = Reservation::withCustomFields()->get()->map->listCustomFields();
         $queries = count(DB::getQueryLog());
 
         $this->assertSame(3, $queries, 'reservations + values + field definitions');
@@ -378,7 +378,7 @@ class HasCustomFieldsTest extends TestCase
 
         $this->reservation->syncCustomFields($input);
 
-        $this->assertSame($input, Reservation::find($this->reservation->id)->getCustomFieldValues());
+        $this->assertSame($input, Reservation::find($this->reservation->id)->listCustomFields());
     }
 
     #[Test]

@@ -39,7 +39,7 @@ class CustomFieldManager
     private bool $hasScope = false;
 
     /**
-     * @param  ArrayObject<string, Collection<string, CustomField>>  $loaded  field lists loaded in this request, shared with scoped copies
+     * @param  ArrayObject<string, mixed>  $loaded  field lists and keys loaded in this request, shared with scoped copies
      */
     public function __construct(
         private readonly FieldTypeRegistry $types,
@@ -101,6 +101,27 @@ class CustomFieldManager
     }
 
     /**
+     * Keys of every field defined for the model in any scope, active or not.
+     * Used to tell custom field attributes apart from other attributes before
+     * the record's scope is known.
+     *
+     * @param  Model|class-string<Model>|string  $model
+     * @return list<string>
+     */
+    public function keysFor(Model|string $model): array
+    {
+        $morph = $this->morphClass($model);
+
+        return $this->loaded['keys|'.$morph] ??= $this->fieldModel()::query()
+            ->where('model_type', $morph)
+            ->distinct()
+            ->pluck('key')
+            ->map(fn (mixed $key) => (string) $key)
+            ->values()
+            ->all();
+    }
+
+    /**
      * The field with this key for the model in the current scope, or null.
      *
      * @param  Model|class-string<Model>|string  $model
@@ -139,6 +160,7 @@ class CustomFieldManager
         $field->scope()->associate($this->currentScope());
 
         $this->assertKeyIsFree($field);
+        $this->assertKeyIsNotAnAttribute($field);
         $field->save();
 
         $this->dispatch(new Events\CustomFieldCreated($field));
@@ -167,6 +189,11 @@ class CustomFieldManager
         }
 
         $this->assertKeyIsFree($field);
+
+        if ($field->isDirty('key')) {
+            $this->assertKeyIsNotAnAttribute($field);
+        }
+
         $field->save();
 
         if ($field->wasChanged()) {
@@ -452,6 +479,37 @@ class CustomFieldManager
 
         if ($taken) {
             throw ValidationException::withMessages(['key' => "The key [{$field->key}] is already in use."]);
+        }
+    }
+
+    /**
+     * A custom field is read as $model->key, so the key must not already mean
+     * something on the model: a column, cast, accessor, appended attribute,
+     * relation or other method.
+     */
+    private function assertKeyIsNotAnAttribute(CustomField $field): void
+    {
+        $class = Relation::getMorphedModel($field->model_type) ?? $field->model_type;
+
+        if (! is_subclass_of($class, Model::class)) {
+            return;
+        }
+
+        /** @var Model $model */
+        $model = new $class;
+        $key = $field->key;
+
+        $taken = method_exists($model, $key)
+            || $model->hasCast($key)
+            || $model->hasGetMutator($key)
+            || $model->hasAttributeMutator($key)
+            || in_array($key, $model->getAppends(), true)
+            || in_array($key, $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable()), true);
+
+        if ($taken) {
+            throw ValidationException::withMessages([
+                'key' => "The key [{$key}] is already used by the [{$class}] model.",
+            ]);
         }
     }
 

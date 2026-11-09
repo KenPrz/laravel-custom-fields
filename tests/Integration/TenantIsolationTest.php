@@ -50,8 +50,8 @@ class TenantIsolationTest extends TestCase
         $a->syncCustomFields(['vip_reference' => 'VIP-1', 'notes' => 'hello']);
         $b->setCustomField('notes', 'world');
 
-        $this->assertSame(['vip_reference', 'notes'], $a->customFields()->keys()->all());
-        $this->assertSame(['notes'], $b->customFields()->keys()->all());
+        $this->assertSame(['vip_reference', 'notes'], $a->customFieldDefinitions()->keys()->all());
+        $this->assertSame(['notes'], $b->customFieldDefinitions()->keys()->all());
 
         $this->expectException(ValidationException::class);
         $b->setCustomField('vip_reference', 'sneaky');
@@ -68,7 +68,7 @@ class TenantIsolationTest extends TestCase
         $moved = PropertyReservation::find($reservation->id);
         $moved->property_id = $this->hotelB->id;
 
-        $this->assertSame([], $moved->getCustomFieldValues());
+        $this->assertSame([], $moved->listCustomFields());
         $this->assertFalse($moved->hasCustomField('secret'));
         $this->assertSame(1, CustomFieldValue::count(), 'the value is hidden, not deleted');
     }
@@ -104,10 +104,10 @@ class TenantIsolationTest extends TestCase
         $this->assertSame('VIP', $reservation->getCustomField('vip_reference'));
 
         FixedScopeResolver::$scope = $this->hotelB;
-        $this->assertSame([], Reservation::find($reservation->id)->getCustomFieldValues());
+        $this->assertSame([], Reservation::find($reservation->id)->listCustomFields());
 
         FixedScopeResolver::$scope = null;
-        $this->assertSame([], Reservation::find($reservation->id)->getCustomFieldValues());
+        $this->assertSame([], Reservation::find($reservation->id)->listCustomFields());
     }
 
     private function field(?Property $scope, string $key): void

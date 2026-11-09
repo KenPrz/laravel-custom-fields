@@ -90,7 +90,7 @@ class EdgeCaseTest extends TestCase
         $this->field('notes');
         $reservation->setCustomField('notes', 'added later');
 
-        $this->assertSame(['notes' => 'added later'], Reservation::find($reservation->id)->getCustomFieldValues());
+        $this->assertSame(['notes' => 'added later'], Reservation::find($reservation->id)->listCustomFields());
     }
 
     #[Test]
@@ -146,7 +146,7 @@ class EdgeCaseTest extends TestCase
         CustomFields::update($b, ['label' => 'Bee', 'key' => 'bee', 'sort_order' => 9]);
         CustomFields::deactivate($b);
 
-        $this->assertSame(['a' => 'one', 'bee' => 'two'], Reservation::find($reservation->id)->getCustomFieldValues());
+        $this->assertSame(['a' => 'one', 'bee' => 'two'], Reservation::find($reservation->id)->listCustomFields());
     }
 
     private function field(string $key): CustomField
