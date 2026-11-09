@@ -36,6 +36,7 @@ User::whereCustomField('tax_bracket', 'a')->get();
 - [Model integration](#model-integration)
 - [Form requests](#form-requests)
 - [Creating and managing fields](#creating-and-managing-fields)
+- [Artisan command](#artisan-command)
 - [Field types](#field-types)
 - [Assigning values](#assigning-values)
 - [Retrieving values](#retrieving-values)
@@ -57,6 +58,8 @@ User::whereCustomField('tax_bracket', 'a')->get();
   `toArray()`, with Eloquent casts. Real columns always win.
 - Two tables (`custom_fields`, `custom_field_values`). Your tables are never changed.
 - 17 built-in field types, plus your own.
+- `php artisan make:custom-field`: a step-by-step form that writes a migration or creates the
+  field right away.
 - Every write goes through Laravel's validator: type rules, select options, and any rules
   you attach to the field.
 - Global fields and per-tenant (scoped) fields, with tenant isolation on every read and write.
@@ -308,6 +311,9 @@ settings and duplicate keys are all rejected.
 | `validate($model, array $input, bool $partial = false)` | `array` | Validated, normalized values |
 | `registerType($name, $type)` | `void` | See [Custom field types](#custom-field-types) |
 | `forScope(?Model $scope)` / `global()` | `CustomFieldManager` | See [Multi-tenancy](#multi-tenancy-and-scopes) |
+| `check(array $attributes)` | `array` | Every check `create()` runs, without saving |
+| `keyError($model, $key)` | `?string` | Why a key can't be used, or null |
+| `dropIfExists($model, $key)` | `void` | Force delete a field by key, including a soft-deleted one. For migrations. |
 | `flush()` | `void` | Forget loaded and cached definitions |
 
 **Keys can't shadow the model.** A field's key can't be a column of the model's table, a cast,
@@ -324,6 +330,94 @@ so that a type change can never silently corrupt stored data.
 
 **Changing settings or rules** is allowed at any time and only affects new writes. For example,
 if you remove a select option, records that already hold it keep it.
+
+## Artisan command
+
+Run it with no arguments for a step-by-step form:
+
+```bash
+php artisan make:custom-field
+```
+
+It asks for each part of the field in order and checks every answer as soon as you give it:
+
+| Step | Checked right away | Skippable |
+|---|---|---|
+| Where to create it (migration or database) | | defaults to migration |
+| Model | the class exists | |
+| Scope (database mode only) | the record exists | yes, for a global field |
+| Key | format, existing fields, a migration that hasn't run yet, the model's columns and methods | |
+| Label | length | defaults to the key as a headline |
+| Type | registered | defaults to `text` |
+| Options (select types) | at least one, no duplicates | an empty value finishes the list |
+| Required | | defaults to no |
+| Description | | yes |
+| Extra validation rules | every rule exists | yes |
+
+It then shows a summary and asks before creating anything.
+
+Every step can also be passed as an option, which skips its question. With `--no-interaction`,
+the key, `--model` and `--type` are required:
+
+```bash
+php artisan make:custom-field tax_bracket \
+    --model=User --type=select --options="a:Bracket A,b:Bracket B" \
+    --required --rules="string" --description="Used for invoices" --no-interaction
+```
+
+| Option | Meaning |
+|---|---|
+| `key` (argument) | The field key |
+| `--model` | A model class, a short name such as `User` (resolved in `App\Models`), or a morph alias |
+| `--type` | A registered field type |
+| `--label` | Defaults to the key as a headline |
+| `--options` | Choices for select types: `value:Label,value:Label`. A value without a label uses itself as the label. |
+| `--rules` | Extra Laravel rules separated by `\|`. A rule that contains `\|` itself, such as some regexes, has to be added to the generated migration by hand. |
+| `--description` | Help text |
+| `--required` | Make the field required |
+| `--mode` | `migration` (default) or `db` |
+| `--scope` | `Model:id`, for example `Property:5`. Database mode only. |
+| `--path` | Where to write the migration, relative to the base path |
+| `--force` | Skip the production confirmation in database mode |
+
+### Migration mode (default)
+
+Writes `database/migrations/{timestamp}_add_tax_bracket_custom_field_to_users.php`:
+
+```php
+public function up(): void
+{
+    CustomFields::global()->create([
+        'model' => \App\Models\User::class,
+        'key' => 'tax_bracket',
+        'label' => 'Tax Bracket',
+        'type' => 'select',
+        'settings' => [
+            'options' => [
+                'a' => 'Bracket A',
+                'b' => 'Bracket B',
+            ],
+        ],
+        'is_required' => true,
+    ]);
+}
+
+public function down(): void
+{
+    CustomFields::global()->dropIfExists(\App\Models\User::class, 'tax_bracket');
+}
+```
+
+Use it for fields your code depends on. The field is created by `php artisan migrate` in every
+environment, and rolling back deletes it **with all its values**. Nothing touches the database
+until you migrate, so it never asks for confirmation. A scope isn't allowed here, because record
+ids differ between environments.
+
+### Database mode
+
+`--mode=db` creates the field right away on the current database and prints its id. Use it for
+one-off fields on a live system, or for scoped fields. In production it asks for confirmation
+first, the same way `php artisan migrate` does. `--force` skips the question.
 
 ## Field types
 
@@ -691,7 +785,8 @@ DB_USERNAME=postgres DB_PASSWORD=secret composer test
   See [Querying](#querying).
 - **No sorting** by custom field values (`orderByCustomField`). Sorting on EAV data can't
   use an index on any database.
-- **Object key order.** MySQL and PostgreSQL may reorder the keys of stored JSON objects.
+- **Object key order.** MySQL and PostgreSQL may reorder the keys of objects stored as values
+  (in `json` fields). Field settings, such as the order of select options, are kept as given.
 - **Text search** in SQLite only ignores case for ASCII letters.
 - **One connection.** The package tables use the default database connection. To move them,
   point `models.field` and `models.value` at your own subclasses that set `$connection`, and

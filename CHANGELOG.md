@@ -28,3 +28,6 @@ First release.
   `withoutCustomFields`, on MySQL, PostgreSQL and SQLite.
 - Events for field and value changes, dispatched after commit, queue-safe.
 - Optional field definition cache.
+- `php artisan make:custom-field`: a step-by-step form, or options for scripts. Writes a
+  migration (default) or creates the field in the database with `--mode=db`.
+- `CustomFields::check()`, `keyError()` and `dropIfExists()`.
