@@ -140,6 +140,8 @@ class CustomFieldManager
         $this->assertKeyIsFree($field);
         $field->save();
 
+        $this->dispatch(new Events\CustomFieldCreated($field));
+
         return $field;
     }
 
@@ -165,6 +167,14 @@ class CustomFieldManager
 
         $this->assertKeyIsFree($field);
         $field->save();
+
+        if ($field->wasChanged()) {
+            $this->dispatch(new Events\CustomFieldUpdated($field));
+        }
+
+        if ($field->wasChanged('is_active')) {
+            $this->dispatch($field->is_active ? new Events\CustomFieldActivated($field) : new Events\CustomFieldDeactivated($field));
+        }
 
         return $field;
     }
@@ -224,6 +234,8 @@ class CustomFieldManager
         $this->assertVisible($field);
 
         $field->delete();
+
+        $this->dispatch(new Events\CustomFieldDeleted($field, forced: false));
     }
 
     /**
@@ -246,6 +258,8 @@ class CustomFieldManager
         $this->assertVisible($field);
 
         $field->forceDelete();
+
+        $this->dispatch(new Events\CustomFieldDeleted($field, forced: true));
     }
 
     /**
@@ -302,6 +316,18 @@ class CustomFieldManager
     public function flush(): void
     {
         $this->loaded->exchangeArray([]);
+    }
+
+    /**
+     * Dispatch a package event unless events are turned off in config.
+     *
+     * @internal
+     */
+    public function dispatch(object $event): void
+    {
+        if (config('custom-fields.events')) {
+            $this->container->make('events')->dispatch($event);
+        }
     }
 
     /**
@@ -411,7 +437,9 @@ class CustomFieldManager
 
     private function isVisible(CustomField $field): bool
     {
-        return in_array($field->scope_key, ['', CustomField::scopeKeyFor($this->currentScope())], true);
+        $scopeKey = CustomField::scopeKeyFor($field->scope_type, $field->scope_id);
+
+        return in_array($scopeKey, ['', CustomField::scopeKeyFor($this->currentScope())], true);
     }
 
     private function assertVisible(CustomField $field): void

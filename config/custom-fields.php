@@ -85,4 +85,17 @@ return [
 
     'delete_values_with_model' => true,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Events
+    |--------------------------------------------------------------------------
+    |
+    | Dispatch the events in KenPrz\CustomFields\Events when fields and
+    | values change through the package API. Events wait for the current
+    | database transaction to commit.
+    |
+    */
+
+    'events' => true,
+
 ];

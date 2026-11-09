@@ -10,6 +10,9 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use KenPrz\CustomFields\CustomFieldManager;
+use KenPrz\CustomFields\Events\CustomFieldValueCreated;
+use KenPrz\CustomFields\Events\CustomFieldValueDeleted;
+use KenPrz\CustomFields\Events\CustomFieldValueUpdated;
 use KenPrz\CustomFields\Exceptions\CustomFieldException;
 use KenPrz\CustomFields\FieldValidator;
 use KenPrz\CustomFields\Models\CustomField;
@@ -182,8 +185,13 @@ trait HasCustomFields
         $normalized = app(FieldValidator::class)->validate($fields, [$key => null], true, (bool) config('custom-fields.strict'));
 
         foreach ($fields->only(array_keys($normalized)) as $field) {
-            $this->customFieldValues()->where('custom_field_id', $field->getKey())->first()?->delete();
-            $this->unsetRelation('customFieldValues');
+            $stored = $this->customFieldValues()->where('custom_field_id', $field->getKey())->first();
+
+            if ($stored !== null) {
+                $stored->delete();
+                $this->unsetRelation('customFieldValues');
+                app(CustomFieldManager::class)->dispatch(new CustomFieldValueDeleted($stored, $field, $this));
+            }
         }
 
         return $this;
@@ -211,9 +219,18 @@ trait HasCustomFields
             ['value' => $value],
         );
 
-        if (! $stored->wasRecentlyCreated) {
-            $stored->value = $value;
+        if ($stored->wasRecentlyCreated) {
+            app(CustomFieldManager::class)->dispatch(new CustomFieldValueCreated($stored, $field, $this));
+
+            return;
+        }
+
+        $old = $stored->value;
+        $stored->value = $value;
+
+        if ($stored->isDirty('value')) {
             $stored->save();
+            app(CustomFieldManager::class)->dispatch(new CustomFieldValueUpdated($stored, $field, $this, $old));
         }
     }
 
