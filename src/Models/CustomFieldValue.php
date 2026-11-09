@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 class CustomFieldValue extends Model
 {
-    protected $fillable = ['value'];
+    protected $fillable = ['custom_field_id', 'value'];
 
     protected function casts(): array
     {

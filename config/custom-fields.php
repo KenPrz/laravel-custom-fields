@@ -72,4 +72,17 @@ return [
 
     'scope_resolver' => null,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Delete values with the model
+    |--------------------------------------------------------------------------
+    |
+    | When a model using HasCustomFields is deleted, delete its stored values
+    | too. Soft deleted models keep their values until force deleted. Turn
+    | this off if you want to clean up yourself.
+    |
+    */
+
+    'delete_values_with_model' => true,
+
 ];

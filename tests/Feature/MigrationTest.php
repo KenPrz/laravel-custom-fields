@@ -32,7 +32,7 @@ class MigrationTest extends TestCase
     #[Test]
     public function it_leaves_existing_tables_alone(): void
     {
-        $this->assertSame(['id', 'code'], Schema::getColumnListing('reservations'));
+        $this->assertSame(['id', 'code', 'property_id'], Schema::getColumnListing('reservations'));
     }
 
     #[Test]

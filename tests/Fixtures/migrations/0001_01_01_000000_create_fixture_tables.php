@@ -18,11 +18,19 @@ return new class extends Migration
         Schema::create('reservations', function (Blueprint $table) {
             $table->id();
             $table->string('code');
+            $table->foreignId('property_id')->nullable();
+        });
+
+        Schema::create('guests', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->softDeletes();
         });
     }
 
     public function down(): void
     {
+        Schema::dropIfExists('guests');
         Schema::dropIfExists('reservations');
         Schema::dropIfExists('properties');
     }

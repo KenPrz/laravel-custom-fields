@@ -6,3 +6,5 @@ parameters:
     paths:
         - src
         - config
+        # The trait is only analysed where it's used.
+        - tests/Fixtures

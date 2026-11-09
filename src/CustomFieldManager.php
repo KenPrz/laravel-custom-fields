@@ -337,7 +337,8 @@ class CustomFieldManager
             ->get();
 
         // Global fields first, so keyBy() lets a scoped field replace a global one.
-        return $fields
+        // toBase(): an Eloquent collection's only()/except() match primary keys, not field keys.
+        return $fields->toBase()
             ->sortBy(fn (CustomField $field) => $field->scope_key === '' ? 0 : 1)
             ->keyBy('key')
             ->sortBy([['sort_order', 'asc'], ['id', 'asc']]);

@@ -27,6 +27,11 @@ class CustomFieldException extends RuntimeException
         return new self("Custom field [{$key}] belongs to another scope.");
     }
 
+    public static function unsavedModel(string $model): self
+    {
+        return new self("Save the [{$model}] model before writing custom fields to it.");
+    }
+
     public static function invalidModel(string $model): self
     {
         return new self("[{$model}] is not an Eloquent model class or morph map alias.");
