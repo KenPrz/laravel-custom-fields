@@ -1,0 +1,54 @@
+{
+    "name": "kenprz/laravel-custom-fields",
+    "description": "User-defined custom fields for Eloquent models, without touching your schema.",
+    "keywords": ["laravel", "eloquent", "custom-fields", "eav", "udf"],
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Ken Perez",
+            "email": "kenperez.dev@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "illuminate/validation": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.18",
+        "orchestra/testbench": "^10.0|^11.0",
+        "phpunit/phpunit": "^11.5|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "KenPrz\\CustomFields\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "KenPrz\\CustomFields\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "format": "pint",
+        "lint": "pint --test"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "KenPrz\\CustomFields\\CustomFieldsServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
