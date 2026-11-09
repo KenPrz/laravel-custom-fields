@@ -62,6 +62,7 @@ class FieldTypeRegistryTest extends TestCase
     public function it_rejects_classes_that_are_not_field_types(): void
     {
         $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('[stdClass] must implement KenPrz\\CustomFields\\Contracts\\FieldType.');
 
         app(FieldTypeRegistry::class)->register('thing', stdClass::class);
     }
@@ -69,9 +70,17 @@ class FieldTypeRegistryTest extends TestCase
     #[Test]
     public function it_rejects_bad_names(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        foreach (['Bad Name', 'ok!', '1abc', 'a'.str_repeat('b', 64)] as $name) {
+            try {
+                app(FieldTypeRegistry::class)->register($name, TextType::class);
+                $this->fail("Expected [{$name}] to be rejected.");
+            } catch (InvalidArgumentException $e) {
+                $this->assertSame("Invalid custom field type name [{$name}].", $e->getMessage());
+            }
+        }
 
-        app(FieldTypeRegistry::class)->register('Bad Name', TextType::class);
+        app(FieldTypeRegistry::class)->register('a'.str_repeat('b', 63), TextType::class);
+        $this->assertTrue(app(FieldTypeRegistry::class)->has('a'.str_repeat('b', 63)));
     }
 
     #[Test]

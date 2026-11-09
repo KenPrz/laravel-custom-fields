@@ -28,6 +28,23 @@ class ServiceProviderTest extends TestCase
     {
         $paths = CustomFieldsServiceProvider::pathsToPublish(CustomFieldsServiceProvider::class, 'custom-fields-config');
 
-        $this->assertContains(config_path('custom-fields.php'), $paths);
+        $this->assertSame([realpath(__DIR__.'/../../config/custom-fields.php') => config_path('custom-fields.php')], $this->resolve($paths));
+    }
+
+    #[Test]
+    public function it_publishes_the_migrations_from_the_package(): void
+    {
+        $paths = CustomFieldsServiceProvider::pathsToPublish(CustomFieldsServiceProvider::class, 'custom-fields-migrations');
+
+        $this->assertSame([realpath(__DIR__.'/../../database/migrations') => database_path('migrations')], $this->resolve($paths));
+    }
+
+    /**
+     * @param  array<string, string>  $paths
+     * @return array<string, string>
+     */
+    private function resolve(array $paths): array
+    {
+        return collect($paths)->mapWithKeys(fn ($to, $from) => [realpath($from) ?: $from => $to])->all();
     }
 }

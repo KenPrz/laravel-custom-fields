@@ -133,6 +133,7 @@ class CoverageGapsTest extends TestCase
         $empty = sys_get_temp_dir().'/lcf-app-'.uniqid();
         File::ensureDirectoryExists($empty);
         $this->app->useAppPath($empty);
+        $this->app->useDatabasePath($empty);
         (new ReflectionProperty($this->app, 'namespace'))->setValue($this->app, 'App\\');
 
         $this->artisan('make:custom-field', ['--mode' => 'db'])

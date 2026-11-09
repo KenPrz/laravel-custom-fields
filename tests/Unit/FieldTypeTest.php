@@ -33,6 +33,8 @@ class FieldTypeTest extends TestCase
             'text array' => ['text', [], ['a'], self::INVALID],
             'text int' => ['text', [], 12, self::INVALID],
             'textarea long' => ['textarea', [], str_repeat('a', 1000), str_repeat('a', 1000)],
+            'textarea at the 65535 default limit' => ['textarea', [], str_repeat('a', 65535), str_repeat('a', 65535)],
+            'textarea over the 65535 default limit' => ['textarea', [], str_repeat('a', 65536), self::INVALID],
 
             'number int' => ['number', [], 5, 5],
             'number float' => ['number', [], 2.5, 2.5],
@@ -54,6 +56,7 @@ class FieldTypeTest extends TestCase
             'decimal plus sign' => ['decimal', [], '+4', '4.00'],
             'decimal leading zeros' => ['decimal', [], '007.1', '7.10'],
             'decimal no places' => ['decimal', ['places' => 0], '9', '9'],
+            'decimal places given as a string' => ['decimal', ['places' => '3'], '1.5', '1.500'],
             'decimal big' => ['decimal', ['places' => 4], '123456789012345678901.1234', '123456789012345678901.1234'],
             'decimal too many places' => ['decimal', [], '1.234', self::INVALID],
             'decimal exponent' => ['decimal', [], '1e3', self::INVALID],
@@ -96,18 +99,27 @@ class FieldTypeTest extends TestCase
 
             'email' => ['email', [], 'ken@example.com', 'ken@example.com'],
             'email invalid' => ['email', [], 'not-an-email', self::INVALID],
+            'email at the length limit' => ['email', [], str_repeat('a', 243).'@example.com', str_repeat('a', 243).'@example.com'],
+            'email over the length limit' => ['email', [], str_repeat('a', 244).'@example.com', self::INVALID],
+            'email not a string' => ['email', [], ['ken@example.com'], self::INVALID],
 
             'url' => ['url', [], 'https://example.com/a?b=c', 'https://example.com/a?b=c'],
             'url invalid' => ['url', [], 'example', self::INVALID],
+            'url at the 2048 default limit' => ['url', [], 'https://example.com/'.str_repeat('a', 2028), 'https://example.com/'.str_repeat('a', 2028)],
+            'url over the 2048 default limit' => ['url', [], 'https://example.com/'.str_repeat('a', 2029), self::INVALID],
+            'url not a string' => ['url', [], ['https://example.com'], self::INVALID],
 
             'phone' => ['phone', [], ' +63 (2) 123-4567 ', '+63 (2) 123-4567'],
             'phone letters' => ['phone', [], '555-CALL', self::INVALID],
             'phone no digits' => ['phone', [], '()-', self::INVALID],
+            'phone as an integer' => ['phone', [], 5551234, self::INVALID],
 
             'json array' => ['json', [], ['a' => [1, 2]], ['a' => [1, 2]]],
             'json string' => ['json', [], '{"a":true}', ['a' => true]],
             'json quoted string' => ['json', [], '"hi"', 'hi'],
             'json number' => ['json', [], 3, 3],
+            'json float' => ['json', [], 1.5, 1.5],
+            'json boolean' => ['json', [], true, true],
             'json invalid string' => ['json', [], '{a:1}', self::INVALID],
             'json plain string' => ['json', [], 'hello', self::INVALID],
             'json object' => ['json', [], new stdClass, self::INVALID],
@@ -131,6 +143,29 @@ class FieldTypeTest extends TestCase
 
         $this->assertTrue($passes, 'Expected the value to be accepted.');
         $this->assertSame($expected, $fieldType->normalize($input, $field));
+    }
+
+    #[Test]
+    public function required_settings_cannot_be_null(): void
+    {
+        $registry = app(FieldTypeRegistry::class);
+
+        foreach (['text' => 'max_length', 'decimal' => 'places', 'select' => 'options'] as $type => $setting) {
+            $passes = Validator::make([$setting => null], $registry->get($type)->settingsRules())->passes();
+
+            $this->assertFalse($passes, "{$type}.{$setting} accepted null");
+        }
+    }
+
+    #[Test]
+    public function a_multiselect_reports_one_error_however_many_items_are_wrong(): void
+    {
+        $type = app(FieldTypeRegistry::class)->get('multiselect');
+        $field = new CustomField(['type' => 'multiselect', 'settings' => ['options' => ['a' => 'A']]]);
+
+        $errors = Validator::make(['value' => ['x', 'y', 'z']], ['value' => $type->rules($field)])->errors()->get('value');
+
+        $this->assertSame(['The selected value is invalid.'], $errors);
     }
 
     #[Test]

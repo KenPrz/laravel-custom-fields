@@ -8,6 +8,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use KenPrz\CustomFields\FieldValidator;
 use KenPrz\CustomFields\Models\CustomField;
+use KenPrz\CustomFields\Tests\Fixtures\LegacyUppercase;
 use KenPrz\CustomFields\Tests\Fixtures\Uppercase;
 use KenPrz\CustomFields\Tests\TestCase;
 use PHPUnit\Framework\Attributes\Test;
@@ -115,11 +116,52 @@ class FieldValidatorTest extends TestCase
     }
 
     #[Test]
+    public function validation_is_partial_and_strict_by_default(): void
+    {
+        $validator = app(FieldValidator::class);
+
+        $this->assertSame(['tier' => 'vip'], $validator->validate($this->fields(), ['tier' => 'vip']));
+
+        $this->expectException(ValidationException::class);
+        $validator->validate($this->fields(), ['nope' => 1]);
+    }
+
+    #[Test]
+    public function every_key_is_checked_after_an_inactive_one(): void
+    {
+        $errors = $this->errors(['legacy' => 'x', 'age' => 'not a number']);
+
+        $this->assertEqualsCanonicalizing(['legacy', 'age'], array_keys($errors));
+    }
+
+    #[Test]
+    public function legacy_rule_objects_work_too(): void
+    {
+        $fields = collect(['code' => new CustomField([
+            'key' => 'code', 'label' => 'Code', 'type' => 'text',
+            'settings' => ['max_length' => 255], 'validation_rules' => [LegacyUppercase::class],
+        ])]);
+
+        $this->assertSame(['code' => 'ABC'], app(FieldValidator::class)->validate($fields, ['code' => 'ABC']));
+
+        try {
+            app(FieldValidator::class)->validate($fields, ['code' => 'abc']);
+            $this->fail('Expected the legacy rule to fail.');
+        } catch (ValidationException $e) {
+            $this->assertSame(['The Code must be uppercase (legacy).'], $e->errors()['code']);
+        }
+    }
+
+    #[Test]
     public function it_flags_unknown_rules(): void
     {
-        $unknown = app(FieldValidator::class)->unknownRules(['required', 'min:3', 'regex:/a|b/', 'nonsense', Uppercase::class, 'App\\Missing']);
+        $unknown = app(FieldValidator::class)->unknownRules([
+            'required', 'min:3', 'regex:/a|b/', 'nonsense', Uppercase::class, LegacyUppercase::class,
+            'App\\Missing', \stdClass::class,
+        ]);
 
-        $this->assertSame(['nonsense', 'App\\Missing'], $unknown);
+        // A class that exists but isn't a rule is as unknown as one that doesn't exist.
+        $this->assertSame(['nonsense', 'App\\Missing', \stdClass::class], $unknown);
     }
 
     /**

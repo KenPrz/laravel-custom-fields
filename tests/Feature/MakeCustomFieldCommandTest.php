@@ -27,6 +27,10 @@ class MakeCustomFieldCommandTest extends TestCase
         parent::setUp();
 
         $this->directory = 'storage/framework/testing/custom-field-migrations-'.uniqid();
+
+        // Without --path the command writes to database_path('migrations'), which is Testbench's
+        // skeleton inside vendor/. Point it somewhere disposable so no test (or mutant) can.
+        $this->app->useDatabasePath(base_path($this->directory.'/database'));
     }
 
     protected function tearDown(): void
@@ -198,6 +202,8 @@ class MakeCustomFieldCommandTest extends TestCase
             'The type [nope] is not registered' => ['--type' => 'nope'],
             'Select types need --options' => ['--type' => 'select'],
             'The option [vip] is listed twice' => ['--type' => 'select', '--options' => 'vip,vip'],
+            // Parses to no options at all; only the final check of the whole definition catches it.
+            'The options field is required' => ['--type' => 'select', '--options' => ','],
             'Unknown validation rules: nonsense' => ['--rules' => 'min:2|nonsense'],
             'No ['.Property::class.'] with id [99] exists' => ['--mode' => 'db', '--scope' => Property::class.':99'],
             'must look like Model:id' => ['--mode' => 'db', '--scope' => 'Property'],

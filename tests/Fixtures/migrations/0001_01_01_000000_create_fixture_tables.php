@@ -21,6 +21,10 @@ return new class extends Migration
             $table->foreignId('property_id')->nullable();
         });
 
+        Schema::create('teams', function (Blueprint $table) {
+            $table->string('slug')->primary();
+        });
+
         Schema::create('members', function (Blueprint $table) {
             $table->id();
             $table->string('name');
@@ -38,6 +42,7 @@ return new class extends Migration
     {
         Schema::dropIfExists('guests');
         Schema::dropIfExists('members');
+        Schema::dropIfExists('teams');
         Schema::dropIfExists('reservations');
         Schema::dropIfExists('properties');
     }
