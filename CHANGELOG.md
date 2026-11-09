@@ -14,13 +14,17 @@ First release.
   turn off the package migration after publishing it.
 - `CustomFields` facade for creating, updating, finding, ordering, activating, deactivating,
   deleting and restoring field definitions.
-- `HasCustomFields` trait with `getCustomField`, `getCustomFieldValues`, `hasCustomField`,
-  `setCustomField`, `syncCustomFields` and `forgetCustomField`.
+- `HasCustomFields` trait. Custom fields act like attributes (`$model->key`, `fill()`,
+  `create()`, `update()`, `toArray()`), saved and validated with the model in one transaction.
+  Optional `$customFields` allow-list, `$customFieldCasts` and `$loadCustomFields` properties.
+- `customFieldRules()` for form requests, plus `listCustomFields`, `getCustomField`,
+  `hasCustomField`, `setCustomField`, `syncCustomFields` and `forgetCustomField`.
+- Field keys that would shadow a model column, cast, accessor, relation or method are rejected.
 - 17 built-in field types and `registerType()` for your own.
 - Validation through Laravel's validator, with per-field rules, rule classes and strict mode.
 - Global and scoped fields with a `ScopeResolver` contract and per-record `customFieldScope()`.
-- Query scopes: `whereCustomField`, `whereCustomFieldIn`, `whereCustomFieldContains`,
-  `whereCustomFieldNull`, `whereCustomFieldNotNull` and `withCustomFields`, on MySQL,
-  PostgreSQL and SQLite.
-- Events for field and value changes, dispatched after commit.
+- Query scopes (`#[Scope]`): `whereCustomField`, `whereCustomFieldIn`, `whereCustomFieldContains`,
+  `whereCustomFieldNull`, `whereCustomFieldNotNull`, `withCustomFields` and
+  `withoutCustomFields`, on MySQL, PostgreSQL and SQLite.
+- Events for field and value changes, dispatched after commit, queue-safe.
 - Optional field definition cache.

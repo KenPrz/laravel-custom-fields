@@ -4,18 +4,26 @@ User-defined custom fields for Eloquent models. Add a trait to a model, define f
 runtime, and store validated values, without adding columns to the model's table.
 
 ```php
+class User extends Model
+{
+    use HasCustomFields;
+}
+
+// An admin defines a field at runtime.
 CustomFields::create([
-    'model' => Reservation::class,
-    'key' => 'guest_classification',
-    'label' => 'Guest Classification',
+    'model' => User::class,
+    'key' => 'tax_bracket',
+    'label' => 'Tax bracket',
     'type' => 'select',
-    'settings' => ['options' => ['vip' => 'VIP', 'corporate' => 'Corporate']],
+    'settings' => ['options' => ['a' => 'A', 'b' => 'B']],
 ]);
 
-$reservation->setCustomField('guest_classification', 'vip');
-$reservation->getCustomField('guest_classification'); // "vip"
+// It now works like any other attribute.
+$user = User::create(['name' => 'Ken', 'tax_bracket' => 'b']);
+$user->tax_bracket;            // "b"
+$user->update(['tax_bracket' => 'a']);
 
-Reservation::whereCustomField('guest_classification', 'vip')->get();
+User::whereCustomField('tax_bracket', 'a')->get();
 ```
 
 ## Contents
@@ -26,6 +34,7 @@ Reservation::whereCustomField('guest_classification', 'vip')->get();
 - [Configuration](#configuration)
 - [Migrations](#migrations)
 - [Model integration](#model-integration)
+- [Form requests](#form-requests)
 - [Creating and managing fields](#creating-and-managing-fields)
 - [Field types](#field-types)
 - [Assigning values](#assigning-values)
@@ -40,10 +49,12 @@ Reservation::whereCustomField('guest_classification', 'vip')->get();
 - [Testing](#testing)
 - [Limitations](#limitations)
 - [Upgrading](#upgrading)
-- [Example: a form request and controller](#example-a-form-request-and-controller)
+- [Example: an API controller](#example-an-api-controller)
 
 ## Features
 
+- Custom fields act like attributes: `$user->tax_bracket`, `fill()`, `create()`, `update()`,
+  `toArray()`, with Eloquent casts. Real columns always win.
 - Two tables (`custom_fields`, `custom_field_values`). Your tables are never changed.
 - 17 built-in field types, plus your own.
 - Every write goes through Laravel's validator: type rules, select options, and any rules
@@ -56,7 +67,7 @@ Reservation::whereCustomField('guest_classification', 'vip')->get();
 ## Requirements
 
 - PHP 8.3 or newer
-- Laravel 12 or 13
+- Laravel 12.6 or newer, or Laravel 13
 - MySQL 8, PostgreSQL or SQLite. See [Database compatibility](#database-compatibility).
 
 ## Installation
@@ -125,42 +136,133 @@ php artisan vendor:publish --tag=custom-fields-migrations
 
 ## Model integration
 
-Add the trait to any Eloquent model:
+Add the trait to any Eloquent model. That's all that's required:
 
 ```php
 use Illuminate\Database\Eloquent\Model;
 use KenPrz\CustomFields\Traits\HasCustomFields;
 
-class Reservation extends Model
+class User extends Model
 {
     use HasCustomFields;
 }
 ```
 
-The trait adds:
+Custom fields now behave like attributes:
+
+```php
+$user = User::create(['name' => 'Ken', 'tax_bracket' => 'b']);   // no $fillable entry needed
+
+$user->tax_bracket;                 // "b"
+$user->tax_bracket = 'a';
+$user->save();                      // validated, then saved with the model
+$user->update(['tax_bracket' => 'b']);
+$user->toArray();                   // includes tax_bracket when values are loaded
+isset($user->tax_bracket);          // true
+```
+
+### Optional model properties
+
+```php
+class User extends Model
+{
+    use HasCustomFields;
+
+    // Which custom fields act as attributes. [] or not set = every field defined for the model.
+    protected $customFields = ['tax_bracket', 'birthday', 'preferences'];
+
+    // Casts for custom field attributes, written exactly like $casts.
+    protected $customFieldCasts = [
+        'birthday' => 'immutable_date',
+        'tax_bracket' => TaxBracket::class,          // backed enum
+        'preferences' => AsCollection::class,
+    ];
+
+    // Eager load custom field values on every query, like $with.
+    protected $loadCustomFields = true;
+}
+```
+
+| Property | Default | Like |
+|---|---|---|
+| `$customFields` | every field | `$fillable`, for custom fields |
+| `$customFieldCasts` | dates → Carbon | `$casts` |
+| `$loadCustomFields` | `false` | `$with = ['customFieldValues']` |
+
+### How attribute access works
+
+- **Real attributes win.** A column, cast, accessor, appended attribute or relation is never
+  replaced by a custom field. The package also refuses to create a field whose key is already
+  one of those (see [Creating and managing fields](#creating-and-managing-fields)).
+- **Mass assignment.** Custom field attributes are always fillable, whatever `$fillable` and
+  `$guarded` say. That's safe because every value is validated against its field definition on
+  save, and `$customFields` limits which keys count. Everything else keeps your normal
+  mass-assignment rules.
+- **Saving.** Assigned values are validated before any SQL runs, then written right after the
+  model is saved, in the same transaction. A validation error throws `ValidationException`, and
+  neither the model nor the values are saved. `saveQuietly()` writes custom fields too.
+- **Required fields** are not enforced on `save()`. Seeders and factories keep working when an
+  admin adds a required field. Enforce them in your [form requests](#form-requests).
+- **Casts.** `date` fields come back as Carbon (formatted `Y-m-d` in arrays) and `datetime`
+  fields as Carbon. Anything in `$customFieldCasts` replaces those defaults, using Eloquent's own
+  casting: enums, `AsCollection`, `decimal:2`, custom cast classes and so on. You can assign cast
+  values back: `$user->tax_bracket = TaxBracket::A` stores `"a"`.
+- **Serialization.** `toArray()` and JSON include custom field attributes when their values are
+  loaded (eager loaded, or just created). It never runs a query to load them. `$hidden` and
+  `$visible` apply to custom fields like any attribute. The raw `customFieldValues` relation is
+  hidden.
+- **Strict Eloquent.** `Model::preventAccessingMissingAttributes()` still throws for keys that
+  are neither attributes nor custom fields. Unset custom fields read as `null`.
+- **Deleting a record** deletes its stored values. For models using `SoftDeletes`, values are
+  kept until the model is force deleted. This is a bulk delete, so it doesn't fire value events.
+  Set `delete_values_with_model` to `false` to clean up yourself.
+
+### Methods
 
 | Method | Returns | Notes |
 |---|---|---|
-| `customFields()` | `Collection<string, CustomField>` | Visible field definitions, active or not, keyed by key, in `sort_order` |
-| `customFieldValues()` | `MorphMany` | Raw value rows. Eager load this. |
-| `getCustomField($key, $default = null)` | `mixed` | Stored value, or `$default` when nothing or null is stored |
-| `getCustomFieldValues()` | `array<string, mixed>` | Every stored value keyed by field key, in field order. Includes stored nulls. |
-| `hasCustomField($key)` | `bool` | True when a non-null value is stored. Never throws. |
-| `setCustomField($key, $value)` | `static` | Validate and store one value |
-| `syncCustomFields(array $values)` | `static` | Validate and store several values. Only the given keys change. |
+| `listCustomFields()` | `array<string, mixed>` | Every value keyed by field key, as stored (no casts), in field order |
+| `customFieldRules()` | `array` | Validation rules for a [form request](#form-requests) |
+| `customFieldDefinitions()` | `Collection<string, CustomField>` | Visible field definitions, active or not, keyed by key |
+| `customFieldValues()` | `MorphMany` | Raw value rows |
+| `getCustomField($key, $default = null)` | `mixed` | Stored value, no casts. Throws for unknown keys in strict mode. |
+| `setCustomField($key, $value)` | `static` | Validate and write one value right away, without saving the model |
+| `syncCustomFields(array $values)` | `static` | Validate and write several values right away. Only the given keys change. |
 | `forgetCustomField($key)` | `static` | Delete one stored value |
+| `hasCustomField($key)` | `bool` | True when a non-null value is stored. Never throws. |
 | `customFieldScope()` | `?Model` | The tenant this record's fields come from. Override it. |
 
-It also adds query scopes: `withCustomFields()`, `whereCustomField()`, `whereCustomFieldIn()`,
-`whereCustomFieldContains()`, `whereCustomFieldNull()` and `whereCustomFieldNotNull()`.
+Query scopes: `withCustomFields()`, `withoutCustomFields()`, `whereCustomField()`,
+`whereCustomFieldIn()`, `whereCustomFieldContains()`, `whereCustomFieldNull()` and
+`whereCustomFieldNotNull()`.
 
-Values can only be written through these methods. Mass assignment (`create()`, `fill()`)
-never touches custom fields.
+## Form requests
 
-**Deleting a record** deletes its stored values. For models using `SoftDeletes`, values are
-kept until the model is force deleted, so a restore brings them back. This is a bulk delete,
-so it doesn't fire value events. Set `delete_values_with_model` to `false` to clean up yourself.
+Spread `customFieldRules()` into your rules. Custom fields sit next to your columns, with no
+prefix:
 
+```php
+class SaveUserRequest extends FormRequest
+{
+    public function rules(): array
+    {
+        $user = $this->route('user') ?? new User;
+
+        return [
+            'name' => ['required', 'string'],
+            ...$user->customFieldRules(),
+        ];
+    }
+}
+```
+
+- For a **new** model the rules are complete, so required custom fields must be sent.
+- For an **existing** model the rules start with `sometimes`, so a partial update only checks
+  what was sent.
+- The rules come from the record's own scope. When the scope depends on input, build the model
+  with it first: `new Reservation(['property_id' => $this->property_id])`.
+- Only fields in `$customFields` (or all fields, when it's empty) and only active fields are
+  included.
 ## Creating and managing fields
 
 Field definitions are managed through the `CustomFields` facade.
@@ -207,6 +309,10 @@ settings and duplicate keys are all rejected.
 | `forScope(?Model $scope)` / `global()` | `CustomFieldManager` | See [Multi-tenancy](#multi-tenancy-and-scopes) |
 | `flush()` | `void` | Forget loaded and cached definitions |
 
+**Keys can't shadow the model.** A field's key can't be a column of the model's table, a cast,
+an accessor, an appended attribute, a relation or any other method on the model, because
+`$model->key` would be ambiguous. Such keys are rejected with a validation error on `key`.
+
 **Keys stay reserved.** A soft-deleted field keeps its key, so you can restore it later.
 You can't create a new field with the same key until the old one is force deleted.
 
@@ -252,22 +358,24 @@ Notes:
 
 ## Assigning values
 
-```php
-$reservation->setCustomField('guest_age', 30);
+The usual way is through attributes, as shown in [Model integration](#model-integration).
+To write values without saving the model, use the explicit methods:
 
-$reservation->syncCustomFields([
-    'guest_classification' => 'vip',
-    'internal_reference' => 'REF-001',
+```php
+$user->setCustomField('tax_bracket', 'b');
+
+$user->syncCustomFields([
+    'tax_bracket' => 'b',
+    'nickname' => 'Ken',
 ]);
 
-$reservation->forgetCustomField('internal_reference');
+$user->forgetCustomField('nickname');
 ```
 
-- The record must be saved first. Writing to an unsaved model throws `CustomFieldException`.
-- `syncCustomFields()` only changes the keys you pass. Other stored values are left alone.
+Both ways follow the same rules:
+
 - Every value is validated before anything is written. If one value fails, nothing is saved
   and a `ValidationException` lists every error at once.
-- All writes in one call run in a single database transaction.
 - Values are normalized by their type before they're stored, so `'30'` on an integer field is
   stored as `30`.
 - An empty string is stored as `null`, the same as Laravel's `ConvertEmptyStringsToNull`
@@ -276,25 +384,28 @@ $reservation->forgetCustomField('internal_reference');
 - If two requests write the first value for the same record and field at the same time, the
   unique index catches the second insert and it becomes an update. The last write wins.
 
+The explicit methods need a saved model and throw `CustomFieldException` otherwise. Attribute
+assignment works on new models too.
 ## Retrieving values
 
 ```php
-$reservation->getCustomField('guest_age');        // 30
-$reservation->getCustomField('missing', 'n/a');   // "n/a"
-$reservation->getCustomFieldValues();             // ['guest_age' => 30, ...]
-$reservation->hasCustomField('guest_age');        // true
+$user->tax_bracket;                       // cast value, null when not set
+$user->listCustomFields();                // ['tax_bracket' => 'b', ...], as stored
+$user->getCustomField('birthday');        // "1990-05-01", as stored
+$user->getCustomField('missing', 'n/a');  // "n/a"
+$user->hasCustomField('tax_bracket');     // true
 ```
 
-Values come back in the normalized form the type stores, not as objects. A date is
-`"2026-11-09"`, not a Carbon instance. A decimal is `"12.50"`, not a float.
+Stored values are in the normalized form the type stores. For example, a date is
+`"2026-11-09"` and a decimal is `"12.50"`. Attribute access applies casts on top of that.
 
-Values are read from the `customFieldValues` relation, so eager load it for lists:
+Eager load values for lists:
 
 ```php
-$reservations = Reservation::withCustomFields()->get();
+$users = User::withCustomFields()->get();   // or $loadCustomFields = true on the model
 
-foreach ($reservations as $reservation) {
-    $reservation->getCustomFieldValues(); // no extra queries per record
+foreach ($users as $user) {
+    $user->tax_bracket;   // no extra queries per record
 }
 ```
 
@@ -303,7 +414,6 @@ and the field definitions (loaded once per model and scope per request).
 
 **Inactive fields** still return their stored values. **Soft-deleted fields** are hidden
 until restored.
-
 ## Validation
 
 Each value is checked against, in order:
@@ -331,12 +441,13 @@ Other checks:
   are ignored on write, read as the default, and match nothing in queries.
 - **Inactive fields** reject writes, including `forgetCustomField()`.
 - **Required fields** reject `null`, `''`, `[]` and `forgetCustomField()`.
-- **Partial updates.** `syncCustomFields()` only checks the keys you pass, so a required field
-  you didn't pass isn't reported as missing. To demand every required field, for example on a
-  create form, validate the full input first:
+- **Partial updates.** Saves and `syncCustomFields()` only check the keys you pass, so a
+  required field you didn't pass isn't reported as missing. To demand every required field,
+  use `customFieldRules()` on a new model in your [form request](#form-requests), or validate
+  the full input yourself:
 
 ```php
-$values = CustomFields::validate(Reservation::class, $request->input('custom_fields', []));
+$values = CustomFields::validate(User::class, $request->only(array_keys((new User)->customFieldRules())));
 ```
 
 Treat field definitions as configuration, not user input: anyone who can edit a field's
@@ -394,8 +505,8 @@ class CurrentTenant implements ScopeResolver
 'scope_resolver' => App\CustomFields\CurrentTenant::class,
 ```
 
-**Per-record scope.** When a record knows its own tenant, override `customFieldScope()`. Reads
-and writes on that record then use it:
+**Per-record scope.** When a record knows its own tenant, override `customFieldScope()`.
+Attribute access, saves, `customFieldRules()` and the explicit methods on that record then use it:
 
 ```php
 class Reservation extends Model
@@ -499,7 +610,9 @@ as text in queries. They compare numerically if they extend `NumberType`.
 ## Events
 
 All events are in `KenPrz\CustomFields\Events` and are dispatched after the surrounding
-database transaction commits. A rolled-back write fires nothing.
+database transaction commits. A rolled-back write fires nothing. They use `SerializesModels`,
+so queued listeners get fresh models. The deleted events carry the models as they were, since
+they can't be fetched again.
 
 | Event | Properties |
 |---|---|
@@ -512,7 +625,7 @@ database transaction commits. A rolled-back write fires nothing.
 | `CustomFieldValueUpdated` | `value`, `field`, `entity`, `oldValue` |
 | `CustomFieldValueDeleted` | `value`, `field`, `entity` |
 
-Events fire for changes made through the facade and the trait. Changes you make directly with
+Events fire for changes made through the facade, the trait and attribute saves. Changes you make directly with
 Eloquent or the query builder don't fire them. Turn all events off with `'events' => false`.
 
 ## Caching
@@ -561,6 +674,14 @@ DB_USERNAME=postgres DB_PASSWORD=secret composer test
 
 ## Limitations
 
+- **Overridden model methods.** The trait overrides `getAttribute()`, `setAttribute()`,
+  `isFillable()`, `fillableFromArray()`, `attributesToArray()` and `save()`. If your model (or
+  another trait) overrides one of them too, call the trait's version or attribute access won't
+  fully work. A custom `save()` still gets validation and writes through model events, just
+  without the shared transaction.
+- **First fill per request** runs one small query for the model's field keys, unless
+  `$customFields` lists them.
+
 - **Type changes** are blocked once a field has values. See
   [Creating and managing fields](#creating-and-managing-fields).
 - **Queries use the request scope**, not each record's `customFieldScope()`.
@@ -582,46 +703,28 @@ DB_USERNAME=postgres DB_PASSWORD=secret composer test
 This is the first release. Breaking changes will only ship in a new major version, with steps
 in [CHANGELOG.md](CHANGELOG.md).
 
-## Example: a form request and controller
+## Example: an API controller
 
 ```php
-use Illuminate\Foundation\Http\FormRequest;
-use KenPrz\CustomFields\Facades\CustomFields;
-
-class UpdateReservationRequest extends FormRequest
+class UserController
 {
-    public function rules(): array
+    public function store(SaveUserRequest $request)
     {
-        $custom = collect(CustomFields::rules(Reservation::class, partial: true))
-            ->mapWithKeys(fn ($rules, $key) => ["custom_fields.{$key}" => $rules]);
+        return User::create($request->validated());       // 201 includes the custom fields
+    }
 
-        return [
-            'code' => ['required', 'string'],
-            'custom_fields' => ['array'],
-            ...$custom,
-        ];
+    public function update(SaveUserRequest $request, User $user)
+    {
+        $user->update($request->validated());
+
+        return $user->load('customFieldValues');
     }
 }
 ```
 
-```php
-class ReservationController
-{
-    public function update(UpdateReservationRequest $request, Reservation $reservation)
-    {
-        DB::transaction(function () use ($request, $reservation) {
-            $reservation->update($request->safe()->only('code'));
-            $reservation->syncCustomFields($request->input('custom_fields', []));
-        });
-
-        return $reservation->load('customFieldValues');
-    }
-}
-```
-
-`syncCustomFields()` validates again on its own, so the form request rules are only there to
-return every error in one response alongside your other fields.
-
+With `SaveUserRequest` from [Form requests](#form-requests), a field that's required, an
+invalid select option or an unknown key all come back as a normal 422 response, next to the
+errors for your columns.
 ## License
 
 MIT. See [LICENSE](LICENSE).
