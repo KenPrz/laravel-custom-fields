@@ -168,6 +168,17 @@ class ModelTest extends TestCase
     }
 
     #[Test]
+    public function setting_key_order_survives_every_database(): void
+    {
+        $options = ['zebra' => 'Z', 'a' => 'A', 'middle_one' => 'M', 'b' => 'B'];
+        $field = $this->field('tier');
+        $field->settings = ['options' => $options];
+        $field->save();
+
+        $this->assertSame($options, CustomField::find($field->id)->settings['options']);
+    }
+
+    #[Test]
     public function the_entity_relation_uses_the_morph_map(): void
     {
         Relation::morphMap(['reservation' => Reservation::class]);

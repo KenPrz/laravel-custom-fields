@@ -102,7 +102,7 @@ class CustomField extends Model
 
     public function getTable(): string
     {
-        return config('custom-fields.tables.fields');
+        return config('custom-fields.tables.fields', 'custom_fields');
     }
 
     /**

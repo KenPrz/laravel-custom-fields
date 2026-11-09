@@ -33,7 +33,7 @@ class CustomFieldValue extends Model
 
     public function getTable(): string
     {
-        return config('custom-fields.tables.values');
+        return config('custom-fields.tables.values', 'custom_field_values');
     }
 
     /**

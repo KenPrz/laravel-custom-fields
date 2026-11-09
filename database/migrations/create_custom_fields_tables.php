@@ -24,7 +24,9 @@ return new class extends Migration
             $table->string('label');
             $table->text('description')->nullable();
             $table->string('type', 64);
-            $table->json('settings')->nullable();
+            // Text, not JSON: MySQL's JSON type reorders object keys, which would scramble
+            // the order of select options. Settings are never queried in SQL.
+            $table->text('settings')->nullable();
             $table->json('validation_rules')->nullable();
             $table->boolean('is_required')->default(false);
             $table->boolean('is_active')->default(true);
