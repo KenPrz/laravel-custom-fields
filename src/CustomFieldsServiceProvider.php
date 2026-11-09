@@ -18,6 +18,9 @@ class CustomFieldsServiceProvider extends ServiceProvider
 
             return $registry;
         });
+
+        // Scoped, so loaded field lists are dropped between Octane requests and queue jobs.
+        $this->app->scoped(CustomFieldManager::class);
     }
 
     public function boot(): void

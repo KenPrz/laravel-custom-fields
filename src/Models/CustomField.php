@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use KenPrz\CustomFields\CustomFieldManager;
 
 /**
  * A field definition attached to a model type, optionally limited to one scope.
@@ -74,15 +75,29 @@ class CustomField extends Model
     protected static function booted(): void
     {
         static::saving(function (CustomField $field): void {
-            $field->scope_key = $field->scope_type === null
-                ? ''
-                : $field->scope_type.':'.$field->scope_id;
+            $field->scope_key = static::scopeKeyFor($field->scope_type, $field->scope_id);
         });
+
+        static::saved(fn () => app(CustomFieldManager::class)->flush());
+        static::deleted(fn () => app(CustomFieldManager::class)->flush());
+        static::restored(fn () => app(CustomFieldManager::class)->flush());
 
         // The foreign key cascades too, but SQLite only enforces it when foreign keys are on.
         static::forceDeleting(function (CustomField $field): void {
             $field->values()->delete();
         });
+    }
+
+    /**
+     * The scope_key for a scope: '' for global, "{morph class}:{key}" otherwise.
+     */
+    public static function scopeKeyFor(Model|string|null $scope, int|string|null $id = null): string
+    {
+        if ($scope instanceof Model) {
+            return $scope->getMorphClass().':'.$scope->getKey();
+        }
+
+        return $scope === null ? '' : $scope.':'.$id;
     }
 
     public function getTable(): string

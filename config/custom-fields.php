@@ -47,4 +47,29 @@ return [
 
     'run_migrations' => true,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Strict mode
+    |--------------------------------------------------------------------------
+    |
+    | When true, writing or reading a field key that doesn't exist throws.
+    | When false, unknown keys are ignored on write and read as the default.
+    |
+    */
+
+    'strict' => true,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Scope resolver
+    |--------------------------------------------------------------------------
+    |
+    | A class implementing KenPrz\CustomFields\Contracts\ScopeResolver that
+    | returns the current tenant (or property, organization...). Leave null
+    | when you don't need scoped fields or pass the scope yourself.
+    |
+    */
+
+    'scope_resolver' => null,
+
 ];
