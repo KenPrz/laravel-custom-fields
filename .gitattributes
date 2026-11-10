@@ -7,4 +7,5 @@
 /phpunit.xml        export-ignore
 /phpstan.neon       export-ignore
 /pint.json          export-ignore
-/infection.json5     export-ignore
+/infection.json5    export-ignore
+/docs               export-ignore
