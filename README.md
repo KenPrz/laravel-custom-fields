@@ -3,6 +3,8 @@
 User-defined custom fields for Eloquent models. Add a trait to a model, define fields at
 runtime, and store validated values, without adding columns to the model's table.
 
+Documentation: https://kenprz.github.io/laravel-custom-fields/
+
 ```php
 class User extends Model
 {
@@ -620,7 +622,13 @@ class Reservation extends Model
 ```
 
 Queries (`whereCustomField()` and friends) can't use `customFieldScope()`, because no single
-record is known yet. They use the `forScope()` scope or the resolver instead.
+record is known yet. They use the resolver, or global fields only when there is none.
+`forScope()` returns a copy, so it doesn't change queries. To query one tenant's fields without
+a resolver, bind a scoped manager for the request:
+
+```php
+app()->instance(CustomFieldManager::class, CustomFields::forScope($hotel));
+```
 
 ## Querying
 
