@@ -1,5 +1,14 @@
 import { defineConfig } from 'vitepress'
 
+// The repo is private, so badge services can't see it. Read the count at build time instead.
+// ponytail: refreshed on each docs build (push to docs/ or the daily schedule), not live.
+const stars: number | null = await fetch('https://api.github.com/repos/KenPrz/laravel-custom-fields', {
+  headers: process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {},
+})
+  .then((r) => (r.ok ? r.json() : null))
+  .then((repo) => repo?.stargazers_count ?? null)
+  .catch(() => null)
+
 export default defineConfig({
   title: 'Laravel Custom Fields',
   description: 'User-defined custom fields for Eloquent models.',
@@ -14,6 +23,9 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/introduction' },
       { text: 'Examples', link: '/examples/production' },
       { text: 'Reference', link: '/reference/manager' },
+      ...(stars === null
+        ? []
+        : [{ text: `★ ${stars}`, link: 'https://github.com/KenPrz/laravel-custom-fields/stargazers' }]),
     ],
 
     sidebar: [
