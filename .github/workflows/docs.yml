@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
     paths: ['docs/**', '.github/workflows/docs.yml']
-  schedule:
-    - cron: '0 6 * * *'   # refresh the star count
   workflow_dispatch:
 
 permissions:
@@ -28,8 +26,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run build
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
