@@ -23,6 +23,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/introduction' },
       { text: 'Examples', link: '/examples/production' },
       { text: 'Reference', link: '/reference/manager' },
+      { text: 'Roadmap', link: '/roadmap' },
       ...(stars === null
         ? []
         : [{ text: `★ ${stars}`, link: 'https://github.com/KenPrz/laravel-custom-fields/stargazers' }]),
@@ -84,6 +85,7 @@ export default defineConfig({
           { text: 'Database compatibility', link: '/reference/databases' },
           { text: 'Testing', link: '/reference/testing' },
           { text: 'Limitations', link: '/reference/limitations' },
+          { text: 'Roadmap', link: '/roadmap' },
         ],
       },
     ],
