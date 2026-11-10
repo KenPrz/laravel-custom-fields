@@ -6,6 +6,8 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-10
+
 First release.
 
 ### Added
@@ -31,3 +33,6 @@ First release.
 - `php artisan make:custom-field`: a step-by-step form, or options for scripts. Writes a
   migration (default) or creates the field in the database with `--mode=db`.
 - `CustomFields::check()`, `keyError()` and `dropIfExists()`.
+
+[Unreleased]: https://github.com/KenPrz/laravel-custom-fields/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/KenPrz/laravel-custom-fields/releases/tag/v1.0.0
